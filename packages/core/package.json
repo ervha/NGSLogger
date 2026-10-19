@@ -1,0 +1,18 @@
+{
+  "name": "@meseta/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "NGS ログのデコード・種別判定・ActionLog のパース。React にも Tauri にも依存しない。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@typescript/native": "npm:typescript@~7.0.2",
+    "typescript": "npm:@typescript/typescript6@6.0.2"
+  }
+}

@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+# UTF-16LE + CRLF のテスト用ログを、Git が UTF-8 や LF に変換しないようにする。
+fixtures/logs/** binary

@@ -1,0 +1,18 @@
+:root {
+  color: #1c1915;
+  background: #f3efe4;
+  font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP", sans-serif;
+  line-height: 1.6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+a {
+  color: #0f6e6b;
+}

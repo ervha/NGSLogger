@@ -1,0 +1,43 @@
+name: release-desktop
+
+# ひな形。リポジトリ変数 ENABLE_DESKTOP_RELEASE を true にするまで、タグが付いてもビルドしない。
+# 公開前の Windows ビルドは、自分の PC で `pnpm --filter desktop build`（中身は tauri build --no-bundle）。
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: 有効になるまでスキップする
+        id: gate
+        shell: bash
+        run: |
+          if [ "${{ vars.ENABLE_DESKTOP_RELEASE }}" = "true" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "ENABLE_DESKTOP_RELEASE が true ではないため、Windows ビルドはスキップします。"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.ready == 'true'
+      - uses: pnpm/action-setup@v4
+        if: steps.gate.outputs.ready == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.gate.outputs.ready == 'true'
+      - run: pnpm install --frozen-lockfile
+        if: steps.gate.outputs.ready == 'true'
+      - run: pnpm --filter desktop build
+        if: steps.gate.outputs.ready == 'true'
+      - name: zip と SHA-256 は、有効化したあとにここへ足す
+        if: steps.gate.outputs.ready == 'true'
+        shell: bash
+        run: echo "exe は apps/desktop/src-tauri/target/release/ に出ます。Release への添付はまだ手作業です。"
