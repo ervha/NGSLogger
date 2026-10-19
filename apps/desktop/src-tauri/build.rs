@@ -6,6 +6,7 @@ fn main() {
             "get_portable_dir",
             "remember_log_directory",
             "remembered_log_directory",
+            "official_log_directory",
         ]),
     ))
     .expect("failed to run tauri-build");

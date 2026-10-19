@@ -160,7 +160,9 @@ export default function App() {
         try {
           const desktop = await import("./adapters/tauri/logSource.ts");
           const remembered = await desktop.rememberedLogDirectory();
-          const saved = remembered ?? localStorage.getItem(LOCAL_SAVED_FOLDER_KEY);
+          const picked = remembered ?? localStorage.getItem(LOCAL_SAVED_FOLDER_KEY);
+          // ダイアログで選んだフォルダを優先する。無いときだけ公式ログフォルダを使う。
+          const saved = picked || (await desktop.officialLogDirectory());
           if (remembered) {
             try {
               localStorage.setItem(LOCAL_SAVED_FOLDER_KEY, remembered);

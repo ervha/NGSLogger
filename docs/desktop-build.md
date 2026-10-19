@@ -91,8 +91,10 @@ pnpm exec tauri build --no-bundle --runner cargo-xwin --target x86_64-pc-windows
 
 - ウィンドウの基本操作（`core:default`）
 - ファイル／フォルダを選ぶダイアログ（`dialog:allow-open`）
-- exe の場所を返すコマンドと、選んだログフォルダの記録
+- exe の場所を返すコマンドと、選んだログフォルダの記録、公式ログフォルダの実パス
 - `ドキュメント\SEGA\PHANTASYSTARONLINE2\log` の読み取り（`readFile` / `readDir` / `exists`）
+
+`$DOCUMENT` は Tauri の `documentDir` です。Windows では `%USERPROFILE%\Documents` ではなく、`FOLDERID_Documents`（`SHGetKnownFolderPath`）の実パスです。OneDrive に移したドキュメント（`OneDrive\Documents` や、表示名が「ドキュメント」のフォルダ）もここに含まれます。起動時にそのパスへ `SEGA\PHANTASYSTARONLINE2\log` を足して fs スコープへ入れ、フォルダがあればそこを読みます。ダイアログで別のフォルダを選んだあとは、記録したそのフォルダを優先します。
 
 ダイアログで選んだフォルダは、その場で fs プラグインのスコープに足されます。次回も読むため、Rust がそのパスを `data\log-folder.txt`（exe の隣に書けないときは LocalAppData）へ記録し、起動時に同じフォルダだけを許可し直します。画面から任意のパスを許可リストへ足すコマンドはありません。記録ファイル自体は fs プラグインから読めないようにしています。
 
@@ -106,6 +108,7 @@ CSP は本番では自分自身と Tauri の IPC（`ipc:` と `http://ipc.localh
 
 - `meseta-ledger.exe` が開き、タイトルが「メセタ帳」で、ダッシュボードが描画される（CSP で白画面にならない）
 - UTF-16LE のログフォルダを選ぶと件数が表示される
+- Documents が OneDrive 配下（例: `C:\Users\<ユーザー>\OneDrive\Documents` や、ローカライズされたフォルダ名）でも、公式ログフォルダを読み込める
 - 終了して再起動すると、同じフォルダが自動で読まれる（`data\log-folder.txt` ができる）
 - 選んでいないフォルダは読めない
 - exe のあるフォルダが書き込めるとき、隣に `data\webview` ができる

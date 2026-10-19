@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "公式ログフォルダと、ダイアログで選んだフォルダの読み取りだけを許可する。ディスク全体や、画面からの書き込み・SQL は許可しない。",
+  "description": "公式ログフォルダ（Windows の FOLDERID_Documents。OneDrive へ移したドキュメントを含む）と、ダイアログで選んだフォルダの読み取りだけを許可する。ディスク全体や、画面からの書き込み・SQL は許可しない。",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,6 +9,7 @@
     "allow-get-portable-dir",
     "allow-remember-log-directory",
     "allow-remembered-log-directory",
+    "allow-official-log-directory",
     {
       "identifier": "fs:allow-read-file",
       "allow": [

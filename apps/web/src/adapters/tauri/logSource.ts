@@ -49,6 +49,14 @@ export async function rememberedLogDirectory(): Promise<string | null> {
 }
 
 /**
+ * 公式ログフォルダの実パス。Windows では Known Folder のドキュメント
+ * （OneDrive に移している場合はその場所）の下。フォルダが無いときは null。
+ */
+export async function officialLogDirectory(): Promise<string | null> {
+  return invoke<string | null>("official_log_directory");
+}
+
+/**
  * フォルダ選択ダイアログを開き、選択されたフォルダを保存してファイルを返す。
  * ダイアログが許可したパスだけを Rust 側が記録する。ディスク全体は許可しない。
  * ログは UTF-16LE の生バイトなので readTextFile は使わない。
