@@ -70,6 +70,16 @@ jobs:
           Write-Host "作成完了: $zipPath"
           Write-Host "SHA-256: $hash"
 
+      # タグが無い workflow_dispatch では Release を作らない。実行結果に zip を残す。
+      - name: zip とチェックサムを成果物として保存
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: meseta-ledger-windows
+          path: |
+            dist-release/*.zip
+            dist-release/*.sha256
+          if-no-files-found: error
+
       - name: GitHub Release へのアップロード
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
@@ -77,6 +87,6 @@ jobs:
           files: |
             dist-release/*.zip
             dist-release/*.sha256
-          draft: false
+          draft: true
           prerelease: false
           generate_release_notes: true
