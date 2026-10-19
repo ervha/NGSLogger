@@ -159,7 +159,15 @@ export default function App() {
       void (async () => {
         try {
           const desktop = await import("./adapters/tauri/logSource.ts");
-          const saved = localStorage.getItem(LOCAL_SAVED_FOLDER_KEY);
+          const remembered = await desktop.rememberedLogDirectory();
+          const saved = remembered ?? localStorage.getItem(LOCAL_SAVED_FOLDER_KEY);
+          if (remembered) {
+            try {
+              localStorage.setItem(LOCAL_SAVED_FOLDER_KEY, remembered);
+            } catch {
+              // ignore
+            }
+          }
           if (saved) {
             setCurrentFolder(saved);
             const logs = await desktop.scanDirectoryLogs(saved);

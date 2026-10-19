@@ -4,6 +4,7 @@
  * Web 版の成果物には入らない（vite がデッドコードとして落とす。CI で確認する）。
  */
 
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { exists, readDir, readFile } from "@tauri-apps/plugin-fs";
 import type { ReadableLog } from "../web/logSource.ts";
@@ -42,8 +43,15 @@ export async function scanDirectoryLogs(dirPath: string): Promise<ReadableLog[]>
   }
 }
 
+/** 前回の起動でダイアログから記録したログフォルダ。無ければ null。 */
+export async function rememberedLogDirectory(): Promise<string | null> {
+  return invoke<string | null>("remembered_log_directory");
+}
+
 /**
- * フォルダ選択ダイアログを開き、選択されたフォルダを保存してファイルを返す
+ * フォルダ選択ダイアログを開き、選択されたフォルダを保存してファイルを返す。
+ * ダイアログが許可したパスだけを Rust 側が記録する。ディスク全体は許可しない。
+ * ログは UTF-16LE の生バイトなので readTextFile は使わない。
  */
 export async function pickAndSaveDirectoryLogs(): Promise<{
   folderPath: string | null;
@@ -57,6 +65,12 @@ export async function pickAndSaveDirectoryLogs(): Promise<{
   });
   if (typeof selected !== "string" || !selected) {
     return { folderPath: null, files: [] };
+  }
+
+  try {
+    await invoke("remember_log_directory", { path: selected });
+  } catch {
+    // 記録に失敗しても、このセッションはダイアログが足したスコープで読める。
   }
 
   try {
