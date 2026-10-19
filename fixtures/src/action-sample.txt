@@ -1,0 +1,32 @@
+2026-10-11T20:34:12	10	[TakeFromShop]	00000000	テストキャラ		N-Meseta(10260000)	CurrentN-Meseta(20260000)
+2026-10-11T20:40:12	20	[Warehouse-N-Meseta]	00000000	テストキャラ		N-Meseta(-1000000)	CurrentN-Meseta(1000000)	WarehouseN-Meseta(5000000)
+2026-10-11T20:40:17	21	[Buy]	00000000	テストキャラ	サンプルインテグラ	Num(1)
+2026-10-11T20:40:17	22	[Buy]	00000000	テストキャラ		N-Meseta(0)	CurrentN-Meseta(950000)
+2026-10-11T20:40:27	23	[Buy]	00000000	テストキャラ	サンプルキューブ	Num(1)
+2026-10-11T20:40:27	24	[Buy]	00000000	テストキャラ		N-Meseta(0)	CurrentN-Meseta(900000)
+2026-10-11T20:41:00	25	[Buy]	00000000	テストキャラ	サンプル交換素材	Num(800)
+2026-10-11T23:59:54	100	[DisplayToShop]	00000000	テストキャラ	サンプルアミュレット
+2026-10-11T23:59:54	101	[DisplayToShop]	00000000	テストキャラ	サンプルアミュレット
+2026-10-11T23:59:54	102	[DisplayToShop-SetValue]	サンプルアミュレット	N-Meseta(800000)
+2026-10-11T23:59:54	103	[DisplayToShop-SetValue]	サンプルアミュレット	N-Meseta(900000)
+2026-10-12T00:01:25	110	[DisplayToShop]	00000000	テストキャラ	サンプルダガー+100	attr:NONE(0)
+2026-10-12T00:01:25	111	[DisplayToShop-SetValue]	サンプルダガー	attr:NONE(0)	N-Meseta(1000000)
+2026-10-12T00:01:37	112	[DisplayToShop]	00000000	テストキャラ	サンプルスピア+100	attr:NONE(0)
+2026-10-12T00:01:37	113	[DisplayToShop]	00000000	テストキャラ	サンプルボウ+100	attr:NONE(0)
+2026-10-12T00:01:37	114	[DisplayToShop-SetValue]	サンプルボウ	attr:NONE(0)	N-Meseta(900000)
+2026-10-12T00:01:37	115	[DisplayToShop-SetValue]	サンプルスピア	attr:NONE(0)	N-Meseta(900000)
+2026-10-12T00:02:00	120	[Pickup]	00000000	テストキャラ	サンプル鉱石	Num(3)
+2026-10-12T00:02:01	121	[Pickup]	00000000	テストキャラ		N-Meseta(1500)	CurrentN-Meseta(901500)
+2026-10-12T00:02:02	122	[DiscradExchange]	00000000	テストキャラ		N-Meseta(209245)	CurrentN-Meseta(1110745)
+2026-10-12T20:38:13	200	[TakeFromShop]	00000000	テストキャラ		N-Meseta(1710000)	CurrentN-Meseta(2820745)
+2026-10-12T20:57:34	210	[Buy-FromUserShop]	00000000	テストキャラ	サンプルロッド	attr:NONE(0)
+2026-10-12T20:57:34	211	[Buy-FromUserShop]	00000000	テストキャラ		N-Meseta(-1000000)	CurrentN-Meseta(1820745)
+2026-10-12T20:58:15	220	[WithdrawFromShop]	00000000	テストキャラ	サンプルスピア+100
+2026-10-12T23:28:00	300	[DisplayToShop]	00000000	テストキャラ	サンプルアミュレット
+2026-10-12T23:28:00	301	[DisplayToShop]	00000000	テストキャラ	サンプルアミュレット
+2026-10-12T23:28:00	302	[DisplayToShop-SetValue]	サンプルアミュレット	N-Meseta(700000)
+2026-10-12T23:28:00	303	[DisplayToShop-SetValue]	サンプルアミュレット	N-Meseta(700000)
+2026-10-13T20:49:03	400	[TakeFromShop]	00000000	テストキャラ		N-Meseta(630000)	CurrentN-Meseta(2450745)
+2026-10-13T23:02:04	410	[DisplayToShop]	00000000	テストキャラ	サンプルアミュレット
+2026-10-13T23:02:04	411	[DisplayToShop-SetValue]	サンプルアミュレット	N-Meseta(600000)
+2026-10-13T23:02:10	412	[WithdrawFromShop]	00000000	テストキャラ	サンプルアミュレット

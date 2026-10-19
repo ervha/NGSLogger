@@ -1,0 +1,31 @@
+node_modules/
+dist/
+dist-ssr/
+.pnpm-store/
+*.local
+.DS_Store
+
+# Tauri / Rust
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
+# ポータブル版が exe の隣に作るデータ
+data/
+*.mesetaledger
+
+# ゲームクライアントが書き出した生ログ。伏せ字化前のものはコミットしない。
+/raw-logs/
+ActionLog*.txt
+ChatLog*.txt
+SymbolChatLog*.txt
+RewardLog*.txt
+ScratchLog*.txt
+
+# Firebase
+.firebase/
+*-debug.log
+
+# エディタ
+.idea/
+.vscode/*
+!.vscode/extensions.json
