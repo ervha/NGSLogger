@@ -1,10 +1,17 @@
 /**
  * 読み込みの本体。画面のスレッドを止めないように、デコードとパースはここで行う。
- * ログの中身は画面へ返さない。返すのは種別と件数だけ。
- * DB への書き込みは、SQLite Wasm の接続をこの Worker に載せてから足す（まだ未接続）。
+ * ログの中身は原則画面へ返さないが、チャット読み取りがオンの場合は
+ * 遡り閲覧機能のためにパース済みチャット行を返却する。
  */
 
-import { LOG_KIND_LABEL, LogLineReader, detectLogBytes, parseActionLines, countActions } from "@meseta/core";
+import {
+  LOG_KIND_LABEL,
+  LogLineReader,
+  detectLogBytes,
+  parseActionLines,
+  countActions,
+  parseChatLines,
+} from "@meseta/core";
 import type { ImportRequest, ImportResponse } from "./protocol.ts";
 
 function fail(id: number, fileName: string, message: string): ImportResponse {
@@ -12,10 +19,11 @@ function fail(id: number, fileName: string, message: string): ImportResponse {
 }
 
 self.onmessage = (event: MessageEvent<ImportRequest>) => {
-  const { id, fileName, bytes } = event.data;
+  const { id, fileName, bytes, readChat } = event.data;
   try {
     const data = new Uint8Array(bytes);
-    const detected = detectLogBytes(data);
+    const detected = detectLogBytes(data, { readChat });
+
     if (detected.skipBody) {
       const response: ImportResponse = {
         id,
@@ -39,8 +47,14 @@ self.onmessage = (event: MessageEvent<ImportRequest>) => {
     const dataLines = complete.filter((line) =>
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(line),
     );
+
     const actionCounts =
       detected.kind === "ActionLog" ? countActions(parseActionLines(dataLines)) : [];
+
+    const chatRows =
+      readChat && (detected.kind === "ChatLog" || detected.kind === "SymbolChatLog")
+        ? parseChatLines(dataLines)
+        : undefined;
 
     const response: ImportResponse = {
       id,
@@ -52,6 +66,7 @@ self.onmessage = (event: MessageEvent<ImportRequest>) => {
       dataLineCount: dataLines.length,
       heldPartial: done.held.length > 0,
       actionCounts,
+      chatRows,
     };
     self.postMessage(response);
   } catch (error) {

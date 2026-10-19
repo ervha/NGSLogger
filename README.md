@@ -22,9 +22,9 @@ PHANTASY STAR ONLINE 2 NEW GENESIS
 - マクロ、キー送信、画面認識によるクリックなどの自動操作はしません。
 - クライアントから抜き出したデータや、攻略サイトの転載は使いません。
 - RMT へのリンクや、N-メセタの円換算は出しません。
-- 他のプレイヤーの名前、ID、会話は保存も表示もしません。チャット系のログは読みません。
+- 外部サーバーへのログ送信は一切行いません（すべての処理はローカルで完結します）。
 
-ログは、Web版ではブラウザの中だけで処理します。このひな形に、ログを受け取るサーバーはありません。
+ログは、Web版ではブラウザの中だけで処理します。サーバーはありません。
 
 ライセンスは未定です。このリポジトリに LICENSE ファイルは置いていません。
 
@@ -33,8 +33,12 @@ PHANTASY STAR ONLINE 2 NEW GENESIS
 - UTF-16LE（BOM あり・なし）のデコードと、チャンクの境界で文字や行が割れない処理
 - 中身による種別判定（ActionLog / RewardLog / ScratchLog / 通貨系 / ChatLog / SymbolChatLog / 未対応）
 - ActionLog のパース（SetValue 行の列ずれ、金額行、`[DiscradExchange]` の綴り）
-- 合成ログでのマイショップ購入、NPC 購入の差分、売却推定のテスト
+- 合成ログでのマイショップ購入、NPC 購入の差分、売却推定のテスト（最大40件の枝刈り探索）
 - ブラウザでファイルまたはフォルダを選び、ActionLog の行数を表示する画面
+- **ポータブル版でのログフォルダ自動読み取り**:
+  - 選択したログフォルダのパスを記憶し、次回以降起動時に自動スキャン＆読み込み。
+- **チャット履歴の遡り確認（オプトイン）**:
+  - 初期値はオフ（プライバシー保護）。トグルをオンにすることで、ChatLog の本文をパースし、チャンネル絞り込み・キーワード検索・日時順ソートで履歴を遡り確認可能。
 - GitHub Pages による Web 版の自動公開（main へのプッシュで自動デプロイ）
 - GitHub Releases による Windows デスクトップ版 zip の配布ワークフロー
 
@@ -91,10 +95,10 @@ pnpm --filter desktop build
 ## ディレクトリ
 
 ```
-packages/core       ログのデコード・判定・パース・売却推定（画面に依存しない）
+packages/core       ログのデコード・判定・パース・売却推定・チャットパース（画面に依存しない）
 packages/db         SQLite のスキーマ（SQL）
 packages/platform   Web 版と Tauri 版で差し替えるインターフェース
-apps/web            Vite + React の画面（GitHub Pages 対応）
+apps/web            Vite + React の画面（GitHub Pages 対応、チャット履歴ビューア同梱）
 apps/desktop        Tauri 2。画面は apps/web のビルド結果を包む
 fixtures            合成ログ。実ログやチャットは入れない
 docs                このツールについて、プライバシー

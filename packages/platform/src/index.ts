@@ -21,15 +21,19 @@ export interface SqlExecutor {
   transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T>;
 }
 
-/** ユーザーが選んだ、まだ中身を読んでいないログファイル。 */
+/** ユーザーが選んだ、または自動検出された、まだ中身を読んでいないログファイル。 */
 export interface LogFileRef {
-  /** 表示名。パス全体は Web 版では持たない */
+  /** 表示名。 */
   name: string;
+  /** ファイルのフルパス（Tauri 版でのみ使用） */
+  path?: string;
 }
 
 export interface LogSource {
-  /** ファイル、またはフォルダの中のファイルを選ぶ。選ばなければ空配列。 */
+  /** ファイル、またはフォルダの中のファイルを初期検出・選択する。選ばなければ空配列。 */
   pick(mode: "files" | "directory"): Promise<LogFileRef[]>;
+  /** 保存されたフォルダ等から自動でファイル一覧を走査・検出する。 */
+  scan?(directoryPath?: string): Promise<LogFileRef[]>;
   /** バイト列を読む。呼び出し側はこれをサーバーへ送らない。 */
   read(file: LogFileRef): Promise<Uint8Array>;
 }
@@ -53,10 +57,10 @@ export interface AppSettings {
   feeRate: number;
   /** 日別集計の日付境界。初期値は 0 時 */
   dayBoundaryHour: number;
-  /** zip 版だけが持つログフォルダ。Web 版では undefined */
+  /** zip / ポータブル版の保存済みログフォルダ。Web 版では undefined */
   logFolder?: string;
-  /** チャット系は読まない。false 固定。 */
-  readChat: false;
+  /** チャットログの読み取り（初期値: false） */
+  readChat: boolean;
 }
 
 export interface SettingsStore {

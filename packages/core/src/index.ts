@@ -14,12 +14,20 @@ export {
 export type { DecodeResult, LogEncoding, SplitLines } from "./decode.ts";
 
 export { LOG_KIND_LABEL, detectLogBytes, detectLogText } from "./detect.ts";
-export type { DetectResult, LogKind } from "./detect.ts";
+export type { DetectOptions, DetectResult, LogKind } from "./detect.ts";
 
 export { isTimestamp, parseKeyValue, splitLogFields } from "./fields.ts";
 
 export { countActions, parseActionLine, parseActionLines, parseActionLog } from "./parseAction.ts";
 export type { ActionCount, ActionRow } from "./parseAction.ts";
+
+export {
+  isSymbolChat,
+  parseChatLine,
+  parseChatLines,
+  parseChatLog,
+} from "./parseChat.ts";
+export type { ChatChannel, ChatRow } from "./parseChat.ts";
 
 export {
   DEFAULT_FEE_RATE,
