@@ -64,6 +64,7 @@ export async function officialLogDirectory(): Promise<string | null> {
 export async function pickAndSaveDirectoryLogs(): Promise<{
   folderPath: string | null;
   files: ReadableLog[];
+  rememberFailed: boolean;
 }> {
   const selected = await open({
     directory: true,
@@ -72,15 +73,18 @@ export async function pickAndSaveDirectoryLogs(): Promise<{
     title: "ログフォルダを選ぶ",
   });
   if (typeof selected !== "string" || !selected) {
-    return { folderPath: null, files: [] };
+    return { folderPath: null, files: [], rememberFailed: false };
   }
 
   let folderPath = selected;
+  let rememberFailed = false;
   try {
     // 記録した表記（\\?\ を外したもの）を、このセッションの読み取りにも使う。
     folderPath = await invoke<string>("remember_log_directory", { path: selected });
   } catch (error) {
     // このセッションはダイアログが足したスコープで読める。記録だけ失敗している。
+    // 画面に出す文言へ error は渡さない。パスが含まれるため。
+    rememberFailed = true;
     console.warn("ログフォルダを記録できませんでした", error);
   }
 
@@ -91,7 +95,7 @@ export async function pickAndSaveDirectoryLogs(): Promise<{
   }
 
   const files = await scanDirectoryLogs(folderPath);
-  return { folderPath, files };
+  return { folderPath, files, rememberFailed };
 }
 
 /**
