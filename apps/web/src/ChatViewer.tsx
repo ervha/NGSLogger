@@ -7,10 +7,55 @@ interface ChatViewerProps {
   readChat: boolean;
 }
 
+function renderHighlightedText(text: string, highlightKeywords: readonly string[]) {
+  if (highlightKeywords.length === 0) return text;
+  const escaped = highlightKeywords
+    .map((k) => k.trim())
+    .filter(Boolean)
+    .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (escaped.length === 0) return text;
+
+  const regex = new RegExp(`(${escaped.join("|")})`, "gi");
+  const parts = text.split(regex);
+
+  return parts.map((part, i) =>
+    regex.test(part) ? (
+      <mark key={i} className="chat-highlight-mark">
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
+
 export function ChatViewer({ chatRows, onToggleReadChat, readChat }: ChatViewerProps) {
   const [selectedChannel, setSelectedChannel] = useState<string>("ALL");
   const [keyword, setKeyword] = useState<string>("");
+  const [highlightWord, setHighlightWord] = useState<string>(() => {
+    try {
+      return localStorage.getItem("meseta_chat_highlight") ?? "";
+    } catch {
+      return "";
+    }
+  });
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+
+  const highlightList = useMemo(() => {
+    return highlightWord
+      .split(/[,，\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }, [highlightWord]);
+
+  const handleHighlightChange = (val: string) => {
+    setHighlightWord(val);
+    try {
+      localStorage.setItem("meseta_chat_highlight", val);
+    } catch {
+      // ignore
+    }
+  };
 
   const channels = useMemo(() => {
     const set = new Set<string>();
@@ -82,13 +127,24 @@ export function ChatViewer({ chatRows, onToggleReadChat, readChat }: ChatViewerP
             </div>
 
             <div className="control-group">
-              <label htmlFor="chat-search">検索:</label>
+              <label htmlFor="chat-search">検索絞り込み:</label>
               <input
                 id="chat-search"
                 type="text"
-                placeholder="発言者または本文で検索..."
+                placeholder="発言者または本文で絞り込み..."
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
+              />
+            </div>
+
+            <div className="control-group">
+              <label htmlFor="chat-highlight">注目ワード強調:</label>
+              <input
+                id="chat-highlight"
+                type="text"
+                placeholder="名前や募集ワード（カンマ区切り）"
+                value={highlightWord}
+                onChange={(e) => handleHighlightChange(e.target.value)}
               />
             </div>
 
@@ -107,19 +163,32 @@ export function ChatViewer({ chatRows, onToggleReadChat, readChat }: ChatViewerP
           </div>
 
           <div className="chat-list" role="feed">
-            {filtered.map((row, idx) => (
-              <div
-                key={`${row.timestamp}_${row.sequence}_${idx}`}
-                className={`chat-item channel-${row.channel.toLowerCase()}`}
-              >
-                <div className="chat-meta">
-                  <span className="chat-timestamp">{row.timestamp.replace("T", " ")}</span>
-                  <span className="chat-channel-badge">{row.channel}</span>
-                  <span className="chat-sender">{row.characterName}</span>
+            {filtered.map((row, idx) => {
+              const isHighlighted =
+                highlightList.length > 0 &&
+                highlightList.some(
+                  (hl) =>
+                    row.body.toLowerCase().includes(hl.toLowerCase()) ||
+                    row.characterName.toLowerCase().includes(hl.toLowerCase()),
+                );
+
+              return (
+                <div
+                  key={`${row.timestamp}_${row.sequence}_${idx}`}
+                  className={`chat-item channel-${row.channel.toLowerCase()} ${isHighlighted ? "chat-highlighted" : ""}`}
+                >
+                  <div className="chat-meta">
+                    <span className="chat-timestamp">{row.timestamp.replace("T", " ")}</span>
+                    <span className="chat-channel-badge">{row.channel}</span>
+                    <span className="chat-sender">
+                      {renderHighlightedText(row.characterName, highlightList)}
+                    </span>
+                    {isHighlighted && <span className="highlight-tag">★注目</span>}
+                  </div>
+                  <div className="chat-body">{renderHighlightedText(row.body, highlightList)}</div>
                 </div>
-                <div className="chat-body">{row.body}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}

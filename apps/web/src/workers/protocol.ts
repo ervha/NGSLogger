@@ -1,4 +1,4 @@
-import type { ChatRow, LogKind } from "@meseta/core";
+import type { ActionRow, ChatRow, LogKind } from "@meseta/core";
 
 /** メインスレッドから Worker へ渡す 1 ファイル。バイト列の所有権は Worker に移す。 */
 export interface ImportRequest {
@@ -25,6 +25,8 @@ export interface ImportSuccess {
   /** 末尾が改行で終わっておらず、最後の行を次回に回した */
   heldPartial: boolean;
   actionCounts: ActionCountRow[];
+  /** ActionLog のパース行 */
+  actionRows?: ActionRow[];
   /** チャット読み取りが有効な場合のパース結果 */
   chatRows?: ChatRow[];
 }

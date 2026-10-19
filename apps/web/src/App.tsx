@@ -3,16 +3,23 @@ import { canUseDirectoryPicker, logsFromFileList, pickDirectoryWithBrowser } fro
 import type { ReadableLog } from "./adapters/web/logSource.ts";
 import { inspectLog } from "./importClient.ts";
 import { ChatViewer } from "./ChatViewer.tsx";
+import { exportDataAsJson, parseBackupFile } from "./exportImport.ts";
 import type { ActionCountRow, ImportSuccess } from "./workers/protocol.ts";
-import type { ChatRow } from "@meseta/core";
+import { buildLedger, summarizeLedger } from "@meseta/core";
+import type { ActionRow, ChatRow } from "@meseta/core";
 import "./App.css";
 
 const ActionChart = lazy(() =>
   import("./ActionChart.tsx").then((mod) => ({ default: mod.ActionChart })),
 );
 
+const MesetaDashboard = lazy(() =>
+  import("./MesetaDashboard.tsx").then((mod) => ({ default: mod.MesetaDashboard })),
+);
+
 const LOCAL_READ_CHAT_KEY = "meseta_read_chat";
 const LOCAL_SAVED_FOLDER_KEY = "meseta_saved_log_folder";
+const LOCAL_AUTO_WATCH_KEY = "meseta_auto_watch";
 
 function mergeCounts(files: readonly ImportSuccess[]): ActionCountRow[] {
   const totals = new Map<string, number>();
@@ -29,11 +36,23 @@ function mergeCounts(files: readonly ImportSuccess[]): ActionCountRow[] {
 export default function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
+  const backupInput = useRef<HTMLInputElement>(null);
+
   const [files, setFiles] = useState<ImportSuccess[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [currentFolder, setCurrentFolder] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "chat" | "files">("dashboard");
+
+  const [autoWatch, setAutoWatch] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(LOCAL_AUTO_WATCH_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  });
+
   const [readChat, setReadChat] = useState<boolean>(() => {
     try {
       return localStorage.getItem(LOCAL_READ_CHAT_KEY) === "true";
@@ -49,14 +68,41 @@ export default function App() {
     try {
       localStorage.setItem(LOCAL_READ_CHAT_KEY, String(enabled));
     } catch {
-      // localStorage failure ignored
+      // ignore
+    }
+  };
+
+  const handleToggleAutoWatch = (enabled: boolean) => {
+    setAutoWatch(enabled);
+    try {
+      localStorage.setItem(LOCAL_AUTO_WATCH_KEY, String(enabled));
+    } catch {
+      // ignore
     }
   };
 
   const counts = useMemo(() => mergeCounts(files), [files]);
   const actionFiles = files.filter((file) => file.kind === "ActionLog" && !file.skipped).length;
 
-  // 全ファイルから収集したチャット行のフラットリスト
+  // 全 ActionRow
+  const allActionRows = useMemo<ActionRow[]>(() => {
+    const rows: ActionRow[] = [];
+    for (const file of files) {
+      if (file.actionRows) {
+        rows.push(...file.actionRows);
+      }
+    }
+    return rows;
+  }, [files]);
+
+  // メセタ分析データ（収支・マイショップ売却推定）
+  const analytics = useMemo(() => {
+    if (allActionRows.length === 0) return null;
+    const ledger = buildLedger(allActionRows);
+    return summarizeLedger(ledger, 0);
+  }, [allActionRows]);
+
+  // 全チャット行
   const allChatRows = useMemo<ChatRow[]>(() => {
     const list: ChatRow[] = [];
     for (const file of files) {
@@ -68,11 +114,13 @@ export default function App() {
   }, [files]);
 
   const load = useCallback(
-    async (logs: readonly ReadableLog[], folderPath?: string) => {
+    async (logs: readonly ReadableLog[], folderPath?: string, silent = false) => {
       if (logs.length === 0) return;
-      setBusy(true);
-      setErrors([]);
-      setFiles([]);
+      if (!silent) {
+        setBusy(true);
+        setErrors([]);
+        setProgress("");
+      }
       if (folderPath) setCurrentFolder(folderPath);
 
       const next: ImportSuccess[] = [];
@@ -81,7 +129,7 @@ export default function App() {
       for (let index = 0; index < logs.length; index += 1) {
         const log = logs[index];
         if (!log) continue;
-        setProgress(`${index + 1} / ${logs.length} ファイル`);
+        if (!silent) setProgress(`${index + 1} / ${logs.length} ファイル`);
         try {
           const bytes = await log.read();
           const response = await inspectLog(log.name, bytes, readChat);
@@ -94,9 +142,11 @@ export default function App() {
       }
 
       setFiles(next);
-      setErrors(problems);
-      setProgress("");
-      setBusy(false);
+      if (!silent) {
+        setErrors(problems);
+        setProgress("");
+        setBusy(false);
+      }
     },
     [readChat],
   );
@@ -118,11 +168,44 @@ export default function App() {
             }
           }
         } catch {
-          // 自動読み取り失敗時は手動操作を待つ
+          // ignore
         }
       })();
     }
   }, [load]);
+
+  // リアルタイム自動監視（Tauri 版でログフォルダが指定されている場合、一定間隔で自動再スキャン）
+  useEffect(() => {
+    if (import.meta.env.MODE !== "tauri" || !currentFolder || !autoWatch) return;
+
+    let mounted = true;
+    let timer: number | undefined;
+
+    const poll = async () => {
+      try {
+        const desktop = await import("./adapters/tauri/logSource.ts");
+        const logs = await desktop.scanDirectoryLogs(currentFolder);
+        if (mounted && logs.length > 0) {
+          // 既存ファイル数と異なればサイレント再読込
+          if (logs.length !== files.length) {
+            await load(logs, currentFolder, true);
+          }
+        }
+      } catch {
+        // ignore
+      }
+      if (mounted) {
+        timer = window.setTimeout(poll, 6000);
+      }
+    };
+
+    timer = window.setTimeout(poll, 6000);
+
+    return () => {
+      mounted = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [currentFolder, autoWatch, files.length, load]);
 
   async function chooseDirectory() {
     if (import.meta.env.MODE === "tauri") {
@@ -147,6 +230,21 @@ export default function App() {
     }
   }
 
+  const handleBackupImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const backup = await parseBackupFile(file);
+      setFiles(backup.files);
+      setErrors([]);
+      alert(`バックアップから ${backup.files.length} ファイルの集計データを復元しました。`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "復元に失敗しました";
+      setErrors([msg]);
+    }
+    e.target.value = "";
+  };
+
   return (
     <div
       className="page"
@@ -158,10 +256,41 @@ export default function App() {
       }}
     >
       <header className="masthead">
-        <p className="eyebrow">PSO2 NGS / PC</p>
-        <h1>メセタ帳</h1>
+        <div className="masthead-top">
+          <div>
+            <p className="eyebrow">PSO2 NGS / PC</p>
+            <h1>メセタ帳</h1>
+          </div>
+          {/* バックアップ・エクスポート操作 */}
+          <div className="backup-actions">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => exportDataAsJson(files)}
+              disabled={files.length === 0}
+              title="現在の集計結果と設定をJSONファイルとして保存します"
+            >
+              📥 バックアップ保存
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => backupInput.current?.click()}
+              title="保存したバックアップJSONを読み込みます"
+            >
+              📤 バックアップ復元
+            </button>
+            <input
+              ref={backupInput}
+              type="file"
+              accept=".json"
+              hidden
+              onChange={(e) => void handleBackupImport(e)}
+            />
+          </div>
+        </div>
         <p className="lede">
-          公式ログをローカルだけで読み、ActionLogの集計やチャット履歴を確認できます。外部サーバーには一切送信しません。
+          公式ログをローカルだけで読み、メセタ収支推移・マイショップ売却推定・チャット履歴を安全に確認できます。外部サーバーへの送信は一切行いません。
         </p>
       </header>
 
@@ -171,7 +300,6 @@ export default function App() {
           PHANTASY STAR ONLINE 2 NEW GENESIS （C）SEGA ／{" "}
           <a href="https://pso2.jp/players/">公式サイト</a>
         </p>
-        <p>チャット履歴の読み取りはオプトイン制です（既定では本文を読みません）。</p>
       </section>
 
       <section className="panel">
@@ -194,9 +322,21 @@ export default function App() {
               }}
               disabled={busy}
             >
-              🔄 再読み込み
+              🔄 今すぐ再読み込み
             </button>
           )}
+
+          {import.meta.env.MODE === "tauri" && currentFolder && (
+            <label className="auto-watch-toggle">
+              <input
+                type="checkbox"
+                checked={autoWatch}
+                onChange={(e) => handleToggleAutoWatch(e.target.checked)}
+              />
+              ログ追記のリアルタイム自動監視
+            </label>
+          )}
+
           <input
             ref={fileInput}
             type="file"
@@ -236,12 +376,30 @@ export default function App() {
         {busy && <p className="progress">{progress || "読み込んでいます…"}</p>}
       </section>
 
-      {/* チャット履歴確認セクション */}
-      <ChatViewer
-        chatRows={allChatRows}
-        readChat={readChat}
-        onToggleReadChat={handleToggleReadChat}
-      />
+      {/* タブナビゲーション */}
+      <nav className="tab-nav" aria-label="表示切り替え">
+        <button
+          type="button"
+          className={`tab-btn ${activeTab === "dashboard" ? "active" : ""}`}
+          onClick={() => setActiveTab("dashboard")}
+        >
+          📊 メセタ収支・売却分析
+        </button>
+        <button
+          type="button"
+          className={`tab-btn ${activeTab === "chat" ? "active" : ""}`}
+          onClick={() => setActiveTab("chat")}
+        >
+          💬 チャット履歴 {allChatRows.length > 0 && `(${allChatRows.length})`}
+        </button>
+        <button
+          type="button"
+          className={`tab-btn ${activeTab === "files" ? "active" : ""}`}
+          onClick={() => setActiveTab("files")}
+        >
+          📁 読み込みファイル ({files.length})
+        </button>
+      </nav>
 
       {errors.length > 0 && (
         <section className="errors" role="alert">
@@ -251,20 +409,49 @@ export default function App() {
         </section>
       )}
 
-      {files.length > 0 && (
+      {/* タブコンテンツ 1: ダッシュボード */}
+      {activeTab === "dashboard" && (
         <>
-          <section className="summary">
+          {analytics ? (
+            <Suspense fallback={<p className="hint">ダッシュボードを準備しています…</p>}>
+              <MesetaDashboard analytics={analytics} />
+            </Suspense>
+          ) : (
+            <section className="panel empty-state">
+              <p>ログを読み込むと、ここに日別収支グラフやマイショップ売却レポートが表示されます。</p>
+            </section>
+          )}
+
+          {counts.length > 0 && (
+            <section className="panel">
+              <h3>アクション別発生回数</h3>
+              <Suspense fallback={<p className="hint">グラフを準備しています…</p>}>
+                <ActionChart counts={counts} />
+              </Suspense>
+            </section>
+          )}
+        </>
+      )}
+
+      {/* タブコンテンツ 2: チャット履歴 */}
+      {activeTab === "chat" && (
+        <ChatViewer
+          chatRows={allChatRows}
+          readChat={readChat}
+          onToggleReadChat={handleToggleReadChat}
+        />
+      )}
+
+      {/* タブコンテンツ 3: 読み込みファイル一覧 */}
+      {activeTab === "files" && (
+        <section className="panel">
+          <div className="summary">
             <p>
               {files.length} ファイルを読みました。ActionLog は {actionFiles} ファイル、アクション行は{" "}
               {counts.reduce((sum, row) => sum + row.count, 0)} 行です。
             </p>
-            <p className="hint">メセタが動く操作は、アイテム行と金額行の 2 行で 1 組です。ここでの数字は行数です。</p>
-          </section>
-          {counts.length > 0 && (
-            <Suspense fallback={<p className="hint">グラフを準備しています…</p>}>
-              <ActionChart counts={counts} />
-            </Suspense>
-          )}
+            <p className="hint">メセタが動く操作は、アイテム行と金額行の 2 行で 1 組です。</p>
+          </div>
           <div className="file-list">
             {files.map((file) => (
               <article key={file.fileName} className="file-card">
@@ -303,7 +490,7 @@ export default function App() {
               </article>
             ))}
           </div>
-        </>
+        </section>
       )}
     </div>
   );
