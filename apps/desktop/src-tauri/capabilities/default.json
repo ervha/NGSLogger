@@ -6,6 +6,10 @@
   "permissions": [
     "core:default",
     "dialog:allow-open",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://pso2.jp/players/" }]
+    },
     "allow-get-portable-dir",
     "allow-remember-log-directory",
     "allow-remembered-log-directory",

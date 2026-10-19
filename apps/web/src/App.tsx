@@ -7,6 +7,7 @@ import { exportDataAsJson, parseBackupFile } from "./exportImport.ts";
 import type { ActionCountRow, ImportSuccess } from "./workers/protocol.ts";
 import { buildLedger, summarizeLedger } from "@meseta/core";
 import type { ActionRow, ChatRow } from "@meseta/core";
+import { OFFICIAL_SITE_URL } from "./officialSite.ts";
 import "./App.css";
 
 const ActionChart = lazy(() =>
@@ -316,7 +317,25 @@ export default function App() {
         <p>本ツールは非公式のファンメイドツールです。株式会社セガとは関係ありません。</p>
         <p>
           PHANTASY STAR ONLINE 2 NEW GENESIS （C）SEGA ／{" "}
-          <a href="https://pso2.jp/players/">公式サイト</a>
+          <a
+            href={OFFICIAL_SITE_URL}
+            onClick={(event) => {
+              if (import.meta.env.MODE !== "tauri") return;
+              event.preventDefault();
+              void import("./adapters/tauri/openOfficialSite.ts").then((mod) =>
+                mod.openOfficialSite(),
+              );
+            }}
+            onAuxClick={(event) => {
+              if (import.meta.env.MODE !== "tauri") return;
+              event.preventDefault();
+              void import("./adapters/tauri/openOfficialSite.ts").then((mod) =>
+                mod.openOfficialSite(),
+              );
+            }}
+          >
+            公式サイト
+          </a>
         </p>
       </section>
 

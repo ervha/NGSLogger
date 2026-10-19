@@ -91,6 +91,7 @@ pnpm exec tauri build --no-bundle --runner cargo-xwin --target x86_64-pc-windows
 
 - ウィンドウの基本操作（`core:default`）
 - ファイル／フォルダを選ぶダイアログ（`dialog:allow-open`）
+- 公式サイト `https://pso2.jp/players/` だけを OS のブラウザで開く（`opener:allow-open-url`）。ファイルを開く権限や、ほかの URL は付けない
 - exe の場所を返すコマンドと、選んだログフォルダの記録、公式ログフォルダの実パス
 - `ドキュメント\SEGA\PHANTASYSTARONLINE2\log` の読み取り（`readFile` / `readDir` / `exists`）
 
@@ -100,7 +101,7 @@ pnpm exec tauri build --no-bundle --runner cargo-xwin --target x86_64-pc-windows
 
 SQL プラグインはバイナリにリンクしたままです。DB のパスを `data` に限れるようになるまで、画面からの `load` / `execute` は許可していません。追記監視のクレート機能は残していますが、今の画面は数秒ごとの再スキャンなので、watch 権限は出していません。`data` への書き込みも、画面の fs API では許可していません。WebView2 のキャッシュとログフォルダの記録は Rust が書きます。
 
-CSP は本番では自分自身と Tauri の IPC（`ipc:` と `http://ipc.localhost`）だけです。外部への `connect-src` はありません。開発時だけ、Vite の `localhost:5173` と HMR 用に緩めています。
+CSP は本番では自分自身と Tauri の IPC（`ipc:` と `http://ipc.localhost`）だけです。外部への `connect-src` はありません。公式サイトは webview から取得せず、デスクトップ版では opener が OS のブラウザを開きます。Web 版のリンクは通常の遷移のままです。開発時だけ、Vite の `localhost:5173` と HMR 用に緩めています。
 
 ## Windows 実機で見てほしいこと
 
@@ -114,6 +115,6 @@ CSP は本番では自分自身と Tauri の IPC（`ipc:` と `http://ipc.localh
 - 選んでいないフォルダは読めない
 - exe のあるフォルダが書き込めるとき、隣に `data\webview` ができる。WebView2 の実データはその中の `EBWebView`
 - exe が Program Files など書き込めない場所にあるとき、WebView2 のユーザーデータは `%LOCALAPPDATA%\dev.meseta.ledger`（中の `EBWebView`）。identifier は `tauri.conf.json` の `dev.meseta.ledger`
-- 公式サイトへのリンクを押したときの挙動
+- 公式サイトへのリンクを押すと OS のブラウザが開き、アプリの画面は公式サイトに置き換わらない
 - `pnpm dev:desktop` で Vite の画面が開く
 - アイコンが付いている（クロスビルドではリソース埋め込みに警告が出た）

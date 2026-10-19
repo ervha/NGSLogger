@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 const root = path.resolve("dist");
-const needles = ["@tauri-apps", "tauri-plugin"];
+const needles = ["@tauri-apps", "tauri-plugin", "plugin:opener", "__TAURI_INTERNALS__"];
 
 async function walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
