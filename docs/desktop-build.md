@@ -96,7 +96,7 @@ pnpm exec tauri build --no-bundle --runner cargo-xwin --target x86_64-pc-windows
 
 `$DOCUMENT` は Tauri の `documentDir` です。Windows では `%USERPROFILE%\Documents` ではなく、`FOLDERID_Documents`（`SHGetKnownFolderPath`）の実パスです。OneDrive に移したドキュメント（`OneDrive\Documents` や、表示名が「ドキュメント」のフォルダ）もここに含まれます。起動時にそのパスへ `SEGA\PHANTASYSTARONLINE2\log` を足して fs スコープへ入れ、フォルダがあればそこを読みます。ダイアログで別のフォルダを選んだあとは、記録したそのフォルダを優先します。
 
-ダイアログで選んだフォルダは、その場で fs プラグインのスコープに足されます。次回も読むため、Rust がそのパスを `data\log-folder.txt`（exe の隣に書けないときは LocalAppData）へ記録し、起動時に同じフォルダだけを許可し直します。画面から任意のパスを許可リストへ足すコマンドはありません。記録ファイル自体は fs プラグインから読めないようにしています。
+ダイアログで選んだフォルダは、その場で fs プラグインのスコープに足されます。次回も読むため、Rust がそのパスを `data\log-folder.txt`（exe の隣に書けないときは LocalAppData）へ記録し、起動時に同じフォルダだけを許可し直します。`canonicalize` やダイアログが返す `\\?\` 付き（`\\?\C:\...` や `\\?\UNC\サーバ\共有`）は、記録する前に dunce と同じ規則で通常のパスへ戻します。保存、次回のスコープ、画面へ返すパスは同じ表記です。260 文字を超えるパスや、`CON` などの予約名はそのまま残します。画面から任意のパスを許可リストへ足すコマンドはありません。記録ファイル自体は fs プラグインから読めないようにしています。
 
 SQL プラグインはバイナリにリンクしたままです。DB のパスを `data` に限れるようになるまで、画面からの `load` / `execute` は許可していません。追記監視のクレート機能は残していますが、今の画面は数秒ごとの再スキャンなので、watch 権限は出していません。`data` への書き込みも、画面の fs API では許可していません。WebView2 のキャッシュとログフォルダの記録は Rust が書きます。
 
@@ -110,6 +110,7 @@ CSP は本番では自分自身と Tauri の IPC（`ipc:` と `http://ipc.localh
 - UTF-16LE のログフォルダを選ぶと件数が表示される
 - Documents が OneDrive 配下（例: `C:\Users\<ユーザー>\OneDrive\Documents` や、ローカライズされたフォルダ名）でも、公式ログフォルダを読み込める
 - 終了して再起動すると、同じフォルダが自動で読まれる（`data\log-folder.txt` ができる）
+- その記録のパスが `\\?\` で始まっていない（通常の `C:\...` や `\\サーバ\共有`。OneDrive 配下でも同じ）
 - 選んでいないフォルダは読めない
 - exe のあるフォルダが書き込めるとき、隣に `data\webview` ができる
 - 公式サイトへのリンクを押したときの挙動

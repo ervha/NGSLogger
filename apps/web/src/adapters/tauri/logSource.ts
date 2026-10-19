@@ -75,20 +75,22 @@ export async function pickAndSaveDirectoryLogs(): Promise<{
     return { folderPath: null, files: [] };
   }
 
+  let folderPath = selected;
   try {
-    await invoke("remember_log_directory", { path: selected });
+    // 記録した表記（\\?\ を外したもの）を、このセッションの読み取りにも使う。
+    folderPath = await invoke<string>("remember_log_directory", { path: selected });
   } catch {
     // 記録に失敗しても、このセッションはダイアログが足したスコープで読める。
   }
 
   try {
-    localStorage.setItem(SAVED_LOG_FOLDER_KEY, selected);
+    localStorage.setItem(SAVED_LOG_FOLDER_KEY, folderPath);
   } catch {
     // localStorage への保存失敗は無視
   }
 
-  const files = await scanDirectoryLogs(selected);
-  return { folderPath: selected, files };
+  const files = await scanDirectoryLogs(folderPath);
+  return { folderPath, files };
 }
 
 /**

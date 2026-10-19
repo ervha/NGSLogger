@@ -32,20 +32,147 @@ fn dir_is_writable(dir: &Path) -> bool {
     }
 }
 
-/// Windows の `\\?\` 付きパスを、画面に出しやすい形に戻す。
-fn portable_path(path: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        let text = path.to_string_lossy();
-        if let Some(stripped) = text.strip_prefix(r"\\?\") {
-            return PathBuf::from(stripped);
-        }
+/// `canonicalize` やダイアログが返す `\\?\` 付きパスを、保存・復元・スコープで同じ表記にする。
+///
+/// ディスク文字付き（`\\?\C:\...`）は dunce と同じ条件のときだけ `C:\...` にする。
+/// `\\?\UNC\サーバ\共有\...` は `\\サーバ\共有\...` にする。長いパス、予約デバイス名、
+/// `..`、`\\.\` や `\\?\GLOBALROOT` はそのまま残す。I/O はしないので、Linux でもテストできる。
+fn simplify_verbatim_path(path: &str) -> String {
+    let path = trim_trailing_windows_sep(path);
+    let Some(rest) = path.strip_prefix(r"\\?\") else {
+        return path.to_string();
+    };
+    if let Some(simplified) = simplify_verbatim_disk(path, rest) {
+        return simplified;
     }
-    path.to_path_buf()
+    if let Some(simplified) = simplify_verbatim_unc(rest) {
+        return simplified;
+    }
+    path.to_string()
+}
+
+fn trim_trailing_windows_sep(path: &str) -> &str {
+    if path.len() <= 3 || !path.ends_with('\\') {
+        return path;
+    }
+    let trimmed = path.trim_end_matches('\\');
+    if trimmed.ends_with(':') {
+        return &path[..trimmed.len() + 1];
+    }
+    if trimmed.len() < 2 {
+        return path;
+    }
+    trimmed
+}
+
+fn windows_utf16_len(text: &str) -> usize {
+    text.chars()
+        .map(|ch| if (ch as u32) <= 0xFFFF { 1 } else { 2 })
+        .sum()
+}
+
+fn exceeds_legacy_max_path(path: &str) -> bool {
+    path.len() > 260 && windows_utf16_len(path) > 260
+}
+
+fn simplify_verbatim_disk(original: &str, rest: &str) -> Option<String> {
+    let mut chars = rest.chars();
+    let drive = chars.next()?;
+    if !drive.is_ascii_alphabetic() || chars.next() != Some(':') {
+        return None;
+    }
+    let body = rest.get(2..)?;
+    let body = if body.is_empty() {
+        ""
+    } else {
+        body.strip_prefix('\\')?
+    };
+    if !windows_components_are_safe(body) || exceeds_legacy_max_path(original) {
+        return None;
+    }
+    Some(rest.to_string())
+}
+
+fn simplify_verbatim_unc(rest: &str) -> Option<String> {
+    let tail = rest.strip_prefix(r"UNC\")?;
+    let mut parts = tail.split('\\').collect::<Vec<_>>();
+    if parts.last() == Some(&"") {
+        parts.pop();
+    }
+    if parts.len() < 2 || !parts.iter().copied().all(is_safe_windows_component) {
+        return None;
+    }
+    let simplified = format!("\\\\{tail}");
+    let simplified = trim_trailing_windows_sep(&simplified).to_string();
+    if exceeds_legacy_max_path(&simplified) {
+        return None;
+    }
+    Some(simplified)
+}
+
+const RESERVED_WINDOWS_NAMES: &[&str] = &[
+    "AUX", "NUL", "PRN", "CON", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+fn windows_components_are_safe(body: &str) -> bool {
+    let mut parts: Vec<&str> = body.split('\\').collect();
+    if parts.last() == Some(&"") {
+        parts.pop();
+    }
+    parts.iter().copied().all(is_safe_windows_component)
+}
+
+fn is_safe_windows_component(name: &str) -> bool {
+    if name.is_empty() || name == "." || name == ".." {
+        return false;
+    }
+    if name.len() > 255 && windows_utf16_len(name) > 255 {
+        return false;
+    }
+    if name.bytes().any(|byte| {
+        matches!(
+            byte,
+            0..=31 | b'<' | b'>' | b':' | b'"' | b'/' | b'\\' | b'|' | b'?' | b'*'
+        )
+    }) {
+        return false;
+    }
+    if matches!(name.as_bytes().last(), Some(b' ' | b'.')) {
+        return false;
+    }
+    !is_reserved_windows_name(name)
+}
+
+fn is_reserved_windows_name(name: &str) -> bool {
+    let stem = match name.rsplit_once('.') {
+        Some((left, _)) if !left.is_empty() => left,
+        _ => name,
+    };
+    let trimmed = stem.trim_end_matches([' ', '.']);
+    trimmed.len() <= 4
+        && RESERVED_WINDOWS_NAMES
+            .iter()
+            .any(|reserved| trimmed.eq_ignore_ascii_case(reserved))
+}
+
+fn display_log_path(path: &Path) -> PathBuf {
+    match path.to_str() {
+        Some(text) => PathBuf::from(simplify_verbatim_path(text)),
+        None => path.to_path_buf(),
+    }
+}
+
+/// 実在するフォルダを、記録と fs スコープで使う表記へ揃える。
+/// Windows では `dunce::canonicalize` が `\\?\` を外せるときに外し、その後に同じ規則を掛ける。
+fn normalize_existing_dir(path: &Path) -> Option<PathBuf> {
+    let canonical = dunce::canonicalize(path).ok()?;
+    let normalized = display_log_path(&canonical);
+    normalized.is_dir().then_some(normalized)
 }
 
 fn format_remembered_log_folder(path: &Path) -> String {
-    format!("{}\n", portable_path(path).display())
+    format!("{}\n", display_log_path(path).display())
 }
 
 fn parse_remembered_log_folder(text: &str) -> Option<PathBuf> {
@@ -53,7 +180,7 @@ fn parse_remembered_log_folder(text: &str) -> Option<PathBuf> {
     if line.is_empty() {
         None
     } else {
-        Some(PathBuf::from(line))
+        Some(display_log_path(Path::new(line)))
     }
 }
 
@@ -98,9 +225,10 @@ fn official_log_dir_from(documents: &Path) -> PathBuf {
 
 /// 公式ログフォルダ。Windows では `FOLDERID_Documents`（`SHGetKnownFolderPath`）。
 /// Tauri の `document_dir` がそれを呼ぶ。OneDrive に移したドキュメントも、その実パスになる。
+/// 返す表記は記録・スコープと同じ規則で `\\?\` を外してある。
 fn official_log_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
     let documents = app.path().document_dir().ok()?;
-    Some(official_log_dir_from(&documents))
+    Some(display_log_path(&official_log_dir_from(&documents)))
 }
 
 fn allow_official_log_dir(app: &tauri::AppHandle) {
@@ -114,7 +242,7 @@ fn read_remembered_log_folder(app: &tauri::AppHandle) -> Option<PathBuf> {
     let file = remembered_log_folder_file(app).ok()?;
     let text = std::fs::read_to_string(file).ok()?;
     let path = parse_remembered_log_folder(&text)?;
-    path.is_dir().then_some(path)
+    normalize_existing_dir(&path)
 }
 
 fn restore_remembered_log_scope(app: &tauri::AppHandle) {
@@ -141,7 +269,7 @@ fn get_portable_dir() -> Result<PortableDir, String> {
     let dir = portable_dir()?;
     let writable = dir_is_writable(&dir);
     Ok(PortableDir {
-        path: dir.to_string_lossy().into_owned(),
+        path: display_log_path(&dir).to_string_lossy().into_owned(),
         writable,
     })
 }
@@ -149,16 +277,17 @@ fn get_portable_dir() -> Result<PortableDir, String> {
 /// ダイアログが許可したログフォルダだけを、次回起動用に記録する。
 /// 画面から任意のパスを足すことはできない。
 #[tauri::command]
-fn remember_log_directory(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    let canonical = PathBuf::from(path)
-        .canonicalize()
-        .map_err(|_| "フォルダを確認できません".to_string())?;
-    persisted_directory_is_acceptable(&canonical, app.fs_scope().is_allowed(&canonical))?;
+fn remember_log_directory(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    let normalized = normalize_existing_dir(Path::new(&path))
+        .ok_or_else(|| "フォルダを確認できません".to_string())?;
+    persisted_directory_is_acceptable(&normalized, app.fs_scope().is_allowed(&normalized))?;
+    // ダイアログが `\\?\` 付きで許可していても、記録と同じ表記をスコープへ足す。
+    let _ = app.fs_scope().allow_directory(&normalized, true);
     let file = remembered_log_folder_file(&app)?;
-    std::fs::write(&file, format_remembered_log_folder(&canonical))
+    std::fs::write(&file, format_remembered_log_folder(&normalized))
         .map_err(|error| error.to_string())?;
     let _ = app.fs_scope().forbid_file(&file);
-    Ok(())
+    Ok(normalized.to_string_lossy().into_owned())
 }
 
 /// 前回ダイアログで選ばれ、記録してあるログフォルダ。無ければ null。
@@ -175,7 +304,7 @@ fn official_log_directory(app: tauri::AppHandle) -> Option<String> {
     if !dir.is_dir() {
         return None;
     }
-    Some(portable_path(&dir).to_string_lossy().into_owned())
+    Some(dir.to_string_lossy().into_owned())
 }
 
 /// WebView2 のキャッシュを exe 隣の data\webview に置く。Windows だけで有効。
@@ -233,8 +362,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_remembered_log_folder, official_log_dir_from, parse_remembered_log_folder,
-        persisted_directory_is_acceptable,
+        display_log_path, format_remembered_log_folder, normalize_existing_dir,
+        official_log_dir_from, parse_remembered_log_folder, persisted_directory_is_acceptable,
+        simplify_verbatim_path,
     };
 
     #[test]
@@ -252,6 +382,108 @@ mod tests {
             parse_remembered_log_folder("\u{feff}C:\\SEGA\\log\nignored\n").as_deref(),
             Some(std::path::Path::new("C:\\SEGA\\log"))
         );
+    }
+
+    #[test]
+    fn verbatim_disk_and_unc_paths_share_one_spelling() {
+        let disk = r"C:\Users\alice\OneDrive\Documents\SEGA\PHANTASYSTARONLINE2\log";
+        let disk_verbatim = r"\\?\C:\Users\alice\OneDrive\Documents\SEGA\PHANTASYSTARONLINE2\log";
+        assert_eq!(simplify_verbatim_path(disk_verbatim), disk);
+        assert_eq!(simplify_verbatim_path(disk), disk);
+        assert_eq!(simplify_verbatim_path(&format!("{disk_verbatim}\\")), disk);
+
+        let localized = r"D:\クラウド\ドキュメント\SEGA\PHANTASYSTARONLINE2\log";
+        assert_eq!(
+            simplify_verbatim_path(&format!(r"\\?\{localized}")),
+            localized
+        );
+
+        let unc = r"\\nas\share\SEGA\PHANTASYSTARONLINE2\log";
+        let unc_verbatim = r"\\?\UNC\nas\share\SEGA\PHANTASYSTARONLINE2\log";
+        assert_eq!(simplify_verbatim_path(unc_verbatim), unc);
+        assert_eq!(simplify_verbatim_path(unc), unc);
+        assert_eq!(simplify_verbatim_path(&format!("{unc_verbatim}\\")), unc);
+    }
+
+    #[test]
+    fn verbatim_prefix_is_kept_when_the_legacy_path_would_be_wrong() {
+        let reserved = r"\\?\C:\PSO2\COM1";
+        assert_eq!(simplify_verbatim_path(reserved), reserved);
+        assert_eq!(
+            simplify_verbatim_path(r"\\?\C:\PSO2\con.txt"),
+            r"\\?\C:\PSO2\con.txt"
+        );
+
+        let parent = r"\\?\C:\foo\..\bar";
+        assert_eq!(simplify_verbatim_path(parent), parent);
+
+        let long_body = "a".repeat(254);
+        let long = format!(r"\\?\C:\{long_body}");
+        assert_eq!(long.len(), 261);
+        assert_eq!(simplify_verbatim_path(&long), long);
+        let borderline = format!(r"\\?\C:\{}", "a".repeat(253));
+        assert_eq!(borderline.len(), 260);
+        assert_eq!(
+            simplify_verbatim_path(&borderline),
+            format!(r"C:\{}", "a".repeat(253))
+        );
+
+        assert_eq!(simplify_verbatim_path(r"\\.\C:\notdisk"), r"\\.\C:\notdisk");
+        assert_eq!(
+            simplify_verbatim_path(r"\\?\GLOBALROOT\Device\ImDisk0\path"),
+            r"\\?\GLOBALROOT\Device\ImDisk0\path"
+        );
+        assert_eq!(
+            simplify_verbatim_path("/tmp/PHANTASYSTARONLINE2/log"),
+            "/tmp/PHANTASYSTARONLINE2/log"
+        );
+    }
+
+    #[test]
+    fn remembered_file_stores_the_same_path_the_scope_will_reopen() {
+        let legacy = r"C:\Users\alice\OneDrive\Documents\SEGA\PHANTASYSTARONLINE2\log";
+        let verbatim = std::path::Path::new(
+            r"\\?\C:\Users\alice\OneDrive\Documents\SEGA\PHANTASYSTARONLINE2\log",
+        );
+        let unc_verbatim = std::path::Path::new(r"\\?\UNC\nas\share\SEGA\PHANTASYSTARONLINE2\log");
+        let stored = format_remembered_log_folder(verbatim);
+        assert_eq!(stored, format!("{legacy}\n"));
+        assert_eq!(
+            format_remembered_log_folder(std::path::Path::new(legacy)),
+            stored
+        );
+        assert_eq!(
+            parse_remembered_log_folder(&stored).as_deref(),
+            Some(std::path::Path::new(legacy))
+        );
+        // 以前の起動が \\?\ のまま書き込んでいても、読み直しで同じ表記になる。
+        assert_eq!(
+            parse_remembered_log_folder(&format!("{}\n", verbatim.display())).as_deref(),
+            Some(std::path::Path::new(legacy))
+        );
+        assert_eq!(
+            parse_remembered_log_folder(&format!("{}\n", unc_verbatim.display())).as_deref(),
+            Some(std::path::Path::new(
+                r"\\nas\share\SEGA\PHANTASYSTARONLINE2\log"
+            ))
+        );
+        let from_verbatim_documents =
+            format!(r"\\?\C:\Users\alice\OneDrive\Documents\SEGA\PHANTASYSTARONLINE2\log");
+        assert_eq!(simplify_verbatim_path(&from_verbatim_documents), legacy);
+    }
+
+    #[test]
+    fn existing_directory_normalization_agrees_with_its_canonical_path() {
+        let dir =
+            std::env::temp_dir().join(format!("meseta-ledger-verbatim-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let normalized = normalize_existing_dir(&dir).unwrap();
+        assert_eq!(
+            normalized,
+            display_log_path(&dunce::canonicalize(&dir).unwrap())
+        );
+        assert!(!normalized.to_string_lossy().starts_with(r"\\?"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
