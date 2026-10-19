@@ -1,10 +1,10 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// Tauri のときだけ相対パスにし、Web 版の公開ビルドには Tauri 用のコードを残さない。
-export default defineConfig(({ mode }) => ({
+// GitHub Pages や Tauri など、サブパスやローカルファイルシステムでも動作するよう相対パスにする
+export default defineConfig({
   plugins: [react()],
-  base: mode === "tauri" ? "./" : "/",
+  base: "./",
   clearScreen: false,
   server: {
     port: 5173,
@@ -16,4 +16,4 @@ export default defineConfig(({ mode }) => ({
   optimizeDeps: {
     exclude: ["@sqlite.org/sqlite-wasm"],
   },
-}));
+});
