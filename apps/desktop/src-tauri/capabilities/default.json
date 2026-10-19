@@ -1,71 +1,33 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "ログフォルダの読み取りと、exe 隣の data への読み書きを許可する。",
+  "description": "公式ログフォルダ（Windows の FOLDERID_Documents。OneDrive へ移したドキュメントを含む）と、ダイアログで選んだフォルダの読み取りだけを許可する。ディスク全体や、画面からの書き込み・SQL は許可しない。",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "dialog:default",
-    "sql:default",
-    "sql:allow-execute",
+    "dialog:allow-open",
+    "allow-get-portable-dir",
+    "allow-remember-log-directory",
+    "allow-remembered-log-directory",
+    "allow-official-log-directory",
     {
       "identifier": "fs:allow-read-file",
       "allow": [
-        { "path": "$DOCUMENT/SEGA/PHANTASYSTARONLINE2/log/**" },
-        { "path": "$EXE/data/**" },
-        { "path": "**" }
+        { "path": "$DOCUMENT/SEGA/PHANTASYSTARONLINE2/log/**" }
       ]
     },
     {
       "identifier": "fs:allow-read-dir",
       "allow": [
         { "path": "$DOCUMENT/SEGA/PHANTASYSTARONLINE2/log" },
-        { "path": "$DOCUMENT/SEGA/PHANTASYSTARONLINE2/log/**" },
-        { "path": "$EXE/data" },
-        { "path": "$EXE/data/**" },
-        { "path": "**" }
-      ]
-    },
-    {
-      "identifier": "fs:allow-stat",
-      "allow": [
-        { "path": "$DOCUMENT/SEGA/PHANTASYSTARONLINE2/log/**" },
-        { "path": "$EXE/data/**" },
-        { "path": "**" }
+        { "path": "$DOCUMENT/SEGA/PHANTASYSTARONLINE2/log/**" }
       ]
     },
     {
       "identifier": "fs:allow-exists",
       "allow": [
-        { "path": "$DOCUMENT/SEGA/PHANTASYSTARONLINE2/log/**" },
-        { "path": "$EXE/data/**" },
-        { "path": "**" }
-      ]
-    },
-    {
-      "identifier": "fs:allow-watch",
-      "allow": [
-        { "path": "$DOCUMENT/SEGA/PHANTASYSTARONLINE2/log/**" },
-        { "path": "**" }
-      ]
-    },
-    {
-      "identifier": "fs:allow-mkdir",
-      "allow": [
-        { "path": "$EXE/data" },
-        { "path": "$EXE/data/**" }
-      ]
-    },
-    {
-      "identifier": "fs:allow-write-file",
-      "allow": [
-        { "path": "$EXE/data/**" }
-      ]
-    },
-    {
-      "identifier": "fs:allow-write-text-file",
-      "allow": [
-        { "path": "$EXE/data/**" }
+        { "path": "$DOCUMENT/SEGA/PHANTASYSTARONLINE2/log" },
+        { "path": "$DOCUMENT/SEGA/PHANTASYSTARONLINE2/log/**" }
       ]
     }
   ]

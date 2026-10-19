@@ -43,6 +43,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [currentFolder, setCurrentFolder] = useState<string>("");
+  const [rememberNotice, setRememberNotice] = useState(0);
   const [activeTab, setActiveTab] = useState<"dashboard" | "chat" | "files">("dashboard");
 
   const [autoWatch, setAutoWatch] = useState<boolean>(() => {
@@ -159,7 +160,17 @@ export default function App() {
       void (async () => {
         try {
           const desktop = await import("./adapters/tauri/logSource.ts");
-          const saved = localStorage.getItem(LOCAL_SAVED_FOLDER_KEY);
+          const remembered = await desktop.rememberedLogDirectory();
+          const picked = remembered ?? localStorage.getItem(LOCAL_SAVED_FOLDER_KEY);
+          // ダイアログで選んだフォルダを優先する。無いときだけ公式ログフォルダを使う。
+          const saved = picked || (await desktop.officialLogDirectory());
+          if (remembered) {
+            try {
+              localStorage.setItem(LOCAL_SAVED_FOLDER_KEY, remembered);
+            } catch {
+              // ignore
+            }
+          }
           if (saved) {
             setCurrentFolder(saved);
             const logs = await desktop.scanDirectoryLogs(saved);
@@ -207,10 +218,17 @@ export default function App() {
     };
   }, [currentFolder, autoWatch, files.length, load]);
 
+  useEffect(() => {
+    if (rememberNotice === 0) return;
+    const timer = window.setTimeout(() => setRememberNotice(0), 8000);
+    return () => window.clearTimeout(timer);
+  }, [rememberNotice]);
+
   async function chooseDirectory() {
     if (import.meta.env.MODE === "tauri") {
       const desktop = await import("./adapters/tauri/logSource.ts");
       const res = await desktop.pickAndSaveDirectoryLogs();
+      if (res.rememberFailed) setRememberNotice((count) => count + 1);
       if (res.files.length > 0) {
         await load(res.files, res.folderPath ?? undefined);
       }
@@ -360,6 +378,12 @@ export default function App() {
             }}
           />
         </div>
+
+        {rememberNotice > 0 && (
+          <p className="toast" role="status">
+            フォルダを記録できませんでした
+          </p>
+        )}
 
         {currentFolder ? (
           <p className="current-folder">

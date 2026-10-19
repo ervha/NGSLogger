@@ -20,4 +20,16 @@
 - GitHub Pages による Web 版の自動公開（main へのプッシュで自動デプロイ）
 - GitHub Releases による Windows デスクトップ版 zip の配布ワークフロー
 
-まだ無いもの: データベースへの永続保存、Windows 用 exe の実機ビルド確認。
+## デスクトップ版をビルドする
+
+画面は Web 版と同じで、Tauri 2 が包みます。インストーラは作らず、exe だけ出します。前提と Windows 実機で残っている確認は [docs/desktop-build.md](docs/desktop-build.md) です。
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm dev:desktop
+pnpm build:desktop
+```
+
+Windows では `apps/desktop/src-tauri/target/release/meseta-ledger.exe` ができます。
+
+まだ無いもの: データベースへの永続保存。Windows 実機での起動とログ読み込みの確認。

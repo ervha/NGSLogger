@@ -151,6 +151,16 @@ button:disabled {
   margin: 8px 0 0;
 }
 
+.toast {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  background: #fbf3e4;
+  border: 1px solid #e4d3a8;
+  color: #6b5420;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
 .errors {
   background: #fdf2f2;
   border: 1px solid #f2c7c7;

@@ -10,6 +10,8 @@
   "scripts": {
     "dev": "pnpm --filter web dev",
     "build": "pnpm --filter web build",
+    "dev:desktop": "pnpm --filter desktop dev",
+    "build:desktop": "pnpm --filter desktop build",
     "test": "vitest run",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint packages && pnpm --filter web lint",

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remember-log-directory"
+description = "Enables the remember_log_directory command without any pre-configured scope."
+commands.allow = ["remember_log_directory"]
+
+[[permission]]
+identifier = "deny-remember-log-directory"
+description = "Denies the remember_log_directory command without any pre-configured scope."
+commands.deny = ["remember_log_directory"]
