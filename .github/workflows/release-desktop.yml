@@ -1,43 +1,82 @@
 name: release-desktop
 
-# ひな形。リポジトリ変数 ENABLE_DESKTOP_RELEASE を true にするまで、タグが付いてもビルドしない。
-# 公開前の Windows ビルドは、自分の PC で `pnpm --filter desktop build`（中身は tauri build --no-bundle）。
 on:
   workflow_dispatch:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: windows-latest
     steps:
-      - name: 有効になるまでスキップする
-        id: gate
-        shell: bash
-        run: |
-          if [ "${{ vars.ENABLE_DESKTOP_RELEASE }}" = "true" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "ENABLE_DESKTOP_RELEASE が true ではないため、Windows ビルドはスキップします。"
-          fi
-
       - uses: actions/checkout@v4
-        if: steps.gate.outputs.ready == 'true'
+
       - uses: pnpm/action-setup@v4
-        if: steps.gate.outputs.ready == 'true'
+
       - uses: actions/setup-node@v4
-        if: steps.gate.outputs.ready == 'true'
         with:
           node-version-file: .nvmrc
           cache: pnpm
+
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.gate.outputs.ready == 'true'
-      - run: pnpm install --frozen-lockfile
-        if: steps.gate.outputs.ready == 'true'
-      - run: pnpm --filter desktop build
-        if: steps.gate.outputs.ready == 'true'
-      - name: zip と SHA-256 は、有効化したあとにここへ足す
-        if: steps.gate.outputs.ready == 'true'
-        shell: bash
-        run: echo "exe は apps/desktop/src-tauri/target/release/ に出ます。Release への添付はまだ手作業です。"
+
+      - name: 依存パッケージのインストール
+        run: pnpm install --frozen-lockfile
+
+      - name: デスクトップ版のビルド (exe)
+        run: pnpm --filter desktop build
+
+      - name: zip アーカイブと SHA-256 チェックサムの作成
+        id: package
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          if (-not $version -or $version -notlike "v*") {
+            $version = "v" + (Get-Content apps/desktop/package.json | ConvertFrom-Json).version
+          }
+          $distDir = "dist-release"
+          New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+
+          # ビルド成果物の exe を探索
+          $exeFiles = Get-ChildItem -Path "apps/desktop/src-tauri/target/release/*.exe" -Exclude "*.pdb"
+          if ($exeFiles.Count -eq 0) {
+            Write-Error "ビルド出力に exe が見つかりませんでした。"
+            exit 1
+          }
+          $targetExe = $exeFiles[0].FullName
+          Write-Host "検出したバイナリ: $targetExe"
+
+          $zipName = "MesetaLedger-${version}-windows-x64.zip"
+          $zipPath = Join-Path $distDir $zipName
+
+          # README と docs も同梱して zip 化
+          $tempStaging = Join-Path $distDir "staging"
+          New-Item -ItemType Directory -Force -Path $tempStaging | Out-Null
+          Copy-Item $targetExe -Destination (Join-Path $tempStaging "MesetaLedger.exe")
+          if (Test-Path "README.md") { Copy-Item "README.md" -Destination $tempStaging }
+          if (Test-Path "docs") { Copy-Item "docs" -Destination (Join-Path $tempStaging "docs") -Recurse }
+
+          Compress-Archive -Path "$tempStaging\*" -DestinationPath $zipPath -Force
+          Remove-Item -Recurse -Force $tempStaging
+
+          # SHA-256 チェックサム生成
+          $hash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
+          $shaFile = "${zipPath}.sha256"
+          "$hash  $zipName" | Out-File -FilePath $shaFile -Encoding utf8NoBOM
+
+          Write-Host "作成完了: $zipPath"
+          Write-Host "SHA-256: $hash"
+
+      - name: GitHub Release へのアップロード
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist-release/*.zip
+            dist-release/*.sha256
+          draft: false
+          prerelease: false
+          generate_release_notes: true

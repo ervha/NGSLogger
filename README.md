@@ -1,6 +1,6 @@
 # メセタ帳（Meseta Ledger）
 
-PSO2 NGS（PC版）が書き出す公式ログを読み、プレイの収支とマイショップの台帳をまとめるためのツールです。いまの中身は、その最初のひな形と、ActionLog の行数を数える縦切りです。
+PSO2 NGS（PC版）のログファイルを読み、N-メセタの動きをまとめるファンメイドの記録帳です。
 
 本ツールは非公式のファンメイドツールです。株式会社セガとは関係ありません。
 
@@ -35,6 +35,8 @@ PHANTASY STAR ONLINE 2 NEW GENESIS
 - ActionLog のパース（SetValue 行の列ずれ、金額行、`[DiscradExchange]` の綴り）
 - 合成ログでのマイショップ購入、NPC 購入の差分、売却推定のテスト
 - ブラウザでファイルまたはフォルダを選び、ActionLog の行数を表示する画面
+- GitHub Pages による Web 版の自動公開（main へのプッシュで自動デプロイ）
+- GitHub Releases による Windows デスクトップ版 zip の配布ワークフロー
 
 まだ無いもの: データベースへの保存、セッション集計、グラフの本番画面、Windows 用 exe のビルド確認。
 
@@ -46,14 +48,14 @@ PHANTASY STAR ONLINE 2 NEW GENESIS
 |---|---|---|
 | Git | 入っていればよい | `winget install --id Git.Git -e` |
 | Node.js | 24 LTS（24.22.0） | https://nodejs.org/ の LTS |
-| pnpm | 12.14.0 | `corepack enable` のあと `corepack prepare pnpm@12.14.0 --activate` |
+| pnpm | 12.14.0 | `corepack enable` のあと `corepack prepare pnpm@12.14.0 --activate` または `npm i -g pnpm` |
 | Rust（zip版を作るとき） | stable（MSVC） | `winget install --id Rustlang.Rustup` のあと `rustup default stable-msvc` |
 | Visual Studio Build Tools | Tauri の前提 | 「Desktop development with C++」 |
 | WebView2 | Windows 10（1803 以降）と 11 には入っている | 無いときだけ Evergreen Bootstrapper |
 
 Tauri の前提は公式の説明に沿います: https://v2.tauri.app/start/prerequisites/
 
-エディタは VS Code に ESLint、rust-analyzer、Tauri の拡張を入れると読みやすいです。Firebase CLI は、公開の設定をする段階で `npm install -g firebase-tools` します。プロジェクト ID はまだ入れていません。
+エディタは VS Code に ESLint、rust-analyzer、Tauri の拡張を入れると読みやすいです。
 
 ## セットアップ（Windows / PowerShell）
 
@@ -84,7 +86,7 @@ pnpm --filter desktop dev
 pnpm --filter desktop build
 ```
 
-中身は `tauri build --no-bundle` です。exe は `apps\desktop\src-tauri\target\release\` に出ます。この Linux 上の作業では Windows 向け exe は作っていません。
+中身は `tauri build --no-bundle` です。exe は `apps\desktop\src-tauri\target\release\` に出ます。
 
 ## ディレクトリ
 
@@ -92,7 +94,7 @@ pnpm --filter desktop build
 packages/core       ログのデコード・判定・パース・売却推定（画面に依存しない）
 packages/db         SQLite のスキーマ（SQL）
 packages/platform   Web 版と Tauri 版で差し替えるインターフェース
-apps/web            Vite + React の画面
+apps/web            Vite + React の画面（GitHub Pages 対応）
 apps/desktop        Tauri 2。画面は apps/web のビルド結果を包む
 fixtures            合成ログ。実ログやチャットは入れない
 docs                このツールについて、プライバシー
@@ -109,13 +111,14 @@ Dart を書いている人向けの対応は、計画書の「Dart → TypeScrip
 - 型チェックの `tsc` は TypeScript 7.0.2（create-vite 9.3.0 の既定）です。TypeScript 7.0 には、ESLint が必要とするコンパイラ API がまだありません。公式の案内どおり、`typescript` という名前では TypeScript 6.0.2（`@typescript/typescript6`）を入れ、`tsc` 本体は `@typescript/native`（中身は TypeScript 7.0.2）にしています。
 - create-vite の React テンプレートは既定が Oxlint でした。計画が ESLint を挙げているので、`--eslint` で生成しています。
 - pnpm 12 は、公開直後のパッケージを一度保留します。`@sqlite.org/sqlite-wasm@3.54.1-build1` だけ `pnpm-workspace.yaml` の `minimumReleaseAgeExclude` に入れています。
-- Tauri CLI は 2.12.3、`@tauri-apps/api` は 2.12.4、plugin-fs 2.7.1、plugin-sql 2.6.0、plugin-dialog 2.8.3 です。計画書は「Tauri 2」とだけ書いていました。プラグインの crate は Rust 1.90 以上（edition 2024）を要求します。`rustup default stable-msvc` で入る stable を使ってください。この作業環境の rustc 1.83 ではマニフェストを読めなかったため、`cargo check` と Windows 向け exe のビルドはしていません。
+- Tauri CLI は 2.12.3、`@tauri-apps/api` は 2.12.4、plugin-fs 2.7.1、plugin-sql 2.6.0、plugin-dialog 2.8.3 です。計画書は「Tauri 2」とだけ書いていました。プラグインの crate は Rust 1.90 以上（edition 2024）を要求します。`rustup default stable-msvc` で入る stable を使ってください。
 - アプリの識別子 `dev.meseta.ledger` は仮です。公開前に自分のドメインへ変えてください。
 - ゴールデンテストは、解析レポートと同じ形の合成データです。実ログの件数（拾得 6043 行など）は再現していません。実在のプレイヤー名や ID は入れていません。ChatLog のファイルも置いていません。
 - 売却推定は試作の総当たりを移植し、出品中が 12 件を超えると「推定しない」で止めます。動的計画法への置き換えはまだです。
 - 画面は ActionLog の行数までです。SQLite のスキーマと opfs-sahpool の接続口はありますが、画面はまだ DB に書きません。
 - ダイアログで選んだフォルダは、プラグインの説明ではその起動中だけ読み取りスコープに足されます。再起動後に残す処理は未実装です。
-- Firebase のプロジェクト ID は仮の `meseta-ledger-unset` です。GitHub Actions のデプロイは、シークレット `FIREBASE_SERVICE_ACCOUNT` が空ならスキップして成功します。Windows のリリース用ワークフローも、変数 `ENABLE_DESKTOP_RELEASE` が `true` になるまでスキップします。
+- Web 版は GitHub Pages（`.github/workflows/deploy-pages.yml`）で公開されます。
+- デスクトップ版は GitHub Releases（`.github/workflows/release-desktop.yml`）で、`v*` タグの push または手動起動により zip と SHA-256 チェックサムが配布されます。
 
 ## テスト用ログを作り直す
 

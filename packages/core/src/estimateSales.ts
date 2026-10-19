@@ -6,15 +6,19 @@
  * 候補が 1 通りなら、その出品を売却（推定）にする。複数なら自動では確定しない。
  * すべての候補に共通する品は `commonItems` に入れる（画面で「推定・確実」と出すため）。
  *
- * 出品が多すぎると組み合わせが爆発するので、同時に見る候補が
- * {@link MAX_OPEN_LISTINGS} を超えたら推定しない。
+ * 出品数が多い場合でも、金額の上下限を用いた枝刈り探索（0-1 部分和問題）により、
+ * マイショップ枠（最大40枠）の組み合わせを高速に特定する。
  */
 
 import type { ActionRow } from "./parseAction.ts";
 
 export const DEFAULT_FEE_RATE = 0.1;
-export const MAX_OPEN_LISTINGS = 12;
-const MAX_COMBINATION_SIZE = 8;
+/** マイショップ最大出品枠（40件）をカバー */
+export const MAX_OPEN_LISTINGS = 40;
+/** 探索ステップの安全上限 */
+const MAX_SEARCH_STEPS = 50_000;
+/** 保持する解の最大件数 */
+const MAX_SOLUTIONS = 100;
 
 export type ListingStatus = "open" | "withdrawn" | "sold" | "ambiguous";
 
@@ -69,7 +73,7 @@ export interface SaleMatch {
   candidates: SaleCandidate[][];
   /** どの候補にも入っている出品 */
   commonItems: SaleCandidate[];
-  /** 候補が多すぎて総当たりしなかった */
+  /** 候補が多すぎて探索を中断したか */
   tooMany: boolean;
 }
 
@@ -115,26 +119,6 @@ function otherCurrency(item: PendingItem): NpcPurchase {
   };
 }
 
-function combinations(length: number, size: number): number[][] {
-  const found: number[][] = [];
-  const current: number[] = [];
-
-  const walk = (start: number): void => {
-    if (current.length === size) {
-      found.push([...current]);
-      return;
-    }
-    for (let index = start; index < length; index += 1) {
-      current.push(index);
-      walk(index + 1);
-      current.pop();
-    }
-  };
-
-  walk(0);
-  return found;
-}
-
 function candidateKey(items: SaleCandidate[]): string {
   return items
     .map((item) => `${item.itemName}\t${item.price}`)
@@ -172,22 +156,78 @@ function estimateTake(
 
   const solutions: number[][] = [];
   const seen = new Set<string>();
-  const limit = Math.min(open.length, MAX_COMBINATION_SIZE);
 
-  for (let size = 1; size <= limit; size += 1) {
-    for (const indexes of combinations(open.length, size)) {
-      const total = indexes.reduce((sum, index) => sum + (open[index]?.price ?? 0), 0);
-      if (Math.abs(total * (1 - feeRate) - take.amount) >= 1) continue;
-      const items = indexes.map((index) => ({
-        itemName: open[index]?.itemName ?? "",
-        price: open[index]?.price ?? 0,
+  // 価格降順にソート（大きい金額から決めることで枝刈りを最大化）
+  const sorted = open
+    .map((listing, index) => ({
+      index,
+      price: listing.price ?? 0,
+    }))
+    .sort((a, b) => b.price - a.price);
+
+  const n = sorted.length;
+  const suffixSum = new Float64Array(n + 1);
+  for (let i = n - 1; i >= 0; i--) {
+    suffixSum[i] = suffixSum[i + 1] + sorted[i].price;
+  }
+
+  const minGross = (take.amount - 0.999) / (1 - feeRate);
+  const maxGross = (take.amount + 0.999) / (1 - feeRate);
+
+  let steps = 0;
+  let tooMany = false;
+  const selected: number[] = [];
+
+  function dfs(idx: number, currentSum: number): void {
+    if (tooMany) return;
+    steps += 1;
+    if (steps > MAX_SEARCH_STEPS) {
+      tooMany = true;
+      return;
+    }
+
+    if (currentSum >= minGross && currentSum <= maxGross && selected.length > 0) {
+      const origIndexes = [...selected].sort((a, b) => a - b);
+      const items = origIndexes.map((i) => ({
+        itemName: open[i]?.itemName ?? "",
+        price: open[i]?.price ?? 0,
       }));
       const key = candidateKey(items);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      solutions.push(indexes);
+      if (!seen.has(key)) {
+        seen.add(key);
+        solutions.push(origIndexes);
+        if (solutions.length >= MAX_SOLUTIONS) {
+          tooMany = true;
+          return;
+        }
+      }
+    }
+
+    if (idx >= n) return;
+    // 残りをすべて足しても目標最小値に届かないなら枝刈り
+    if (currentSum + suffixSum[idx] < minGross) return;
+
+    for (let i = idx; i < n; i++) {
+      const p = sorted[i].price;
+      // この価格を足すと目標最大値を超えるならスキップ
+      if (currentSum + p > maxGross) continue;
+
+      selected.push(sorted[i].index);
+      dfs(i + 1, currentSum + p);
+      selected.pop();
     }
   }
+
+  dfs(0, 0);
+
+  // 解をアイテム数・インデックス順に整列して期待値の順序を安定化
+  solutions.sort((a, b) => {
+    if (a.length !== b.length) return a.length - b.length;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return (a[i] ?? 0) - (b[i] ?? 0);
+    }
+    return 0;
+  });
 
   const candidates = solutions.map((indexes) =>
     indexes.map((index) => ({
@@ -210,7 +250,7 @@ function estimateTake(
     gross,
     candidates,
     commonItems: commonToAll(candidates),
-    tooMany: false,
+    tooMany,
   };
 }
 
