@@ -1,9 +1,9 @@
 /**
  * ファイルの中身からログ種別を決める。ファイル名は見ない。
  *
- * チャット系は先頭数行の第3列（チャンネル名）で判断し、そこで読み進めるのをやめる。
- * 本文は戻り値に含めない。ChatLog と SymbolChatLog の区別だけ、同じ先頭数行の
- * 本文が 16 進ハッシュかどうかを見て、その文字列は捨てる。
+ * チャット系は先頭数行の第3列（チャンネル名）で判断する。
+ * readChat が false（既定）の場合は、そこで読み進めるのをやめ、本文を保持しない。
+ * readChat が true の場合は、skipBody: false として本文の解析を許可する。
  */
 
 import { decodeLogBytes } from "./decode.ts";
@@ -17,9 +17,14 @@ export type LogKind =
   | "SymbolChatLog"
   | "Unknown";
 
+export interface DetectOptions {
+  /** チャットログの本文を読み取るかどうか（初期値: false） */
+  readChat?: boolean;
+}
+
 export interface DetectResult {
   kind: LogKind;
-  /** true のときはチャット系。本文をデコードして保持しない。 */
+  /** true のときはチャット系であり本文を破棄する設定。 */
   skipBody: boolean;
 }
 
@@ -44,7 +49,11 @@ function column3(row: string[]): string {
   return row[2] ?? "";
 }
 
-function classify(rows: string[][], chatBodies: string[] | undefined): DetectResult {
+function classify(
+  rows: string[][],
+  chatBodies: string[] | undefined,
+  options?: DetectOptions,
+): DetectResult {
   if (rows.length === 0) return { kind: "Unknown", skipBody: false };
 
   const thirds = rows.map(column3);
@@ -54,7 +63,9 @@ function classify(rows: string[][], chatBodies: string[] | undefined): DetectRes
   if (chatBodies) {
     const symbol =
       chatBodies.length > 0 && chatBodies.every((body) => HEX_BODY.test(body));
-    return { kind: symbol ? "SymbolChatLog" : "ChatLog", skipBody: true };
+    const kind: LogKind = symbol ? "SymbolChatLog" : "ChatLog";
+    const skipBody = options?.readChat ? false : true;
+    return { kind, skipBody };
   }
   if (
     thirds.some(
@@ -82,8 +93,8 @@ function classify(rows: string[][], chatBodies: string[] | undefined): DetectRes
   return { kind: "Unknown", skipBody: false };
 }
 
-/** デコード済みのテキストから種別を決める。チャット本文は結果に残さない。 */
-export function detectLogText(text: string): DetectResult {
+/** デコード済みのテキストから種別を決める。 */
+export function detectLogText(text: string, options?: DetectOptions): DetectResult {
   const rows: string[][] = [];
   let chatBodies: string[] | undefined;
   const lines = text.split(/\r?\n/);
@@ -97,16 +108,16 @@ export function detectLogText(text: string): DetectResult {
       if (chatBodies.length < CHAT_SAMPLE_LIMIT && cols.length > 5) {
         chatBodies.push(cols[5] ?? "");
       }
-      if (chatBodies.length >= CHAT_SAMPLE_LIMIT) break;
+      if (chatBodies.length >= CHAT_SAMPLE_LIMIT && !options?.readChat) break;
       rows.push(cols);
       continue;
     }
     // チャットと分かったあとの行は見ない。混在ファイルは想定していない。
-    if (chatBodies) break;
+    if (chatBodies && !options?.readChat) break;
     rows.push(cols);
   }
 
-  return classify(rows, chatBodies);
+  return classify(rows, chatBodies, options);
 }
 
 function prefixLength(bytes: Uint8Array): number {
@@ -122,13 +133,17 @@ function prefixLength(bytes: Uint8Array): number {
 
 /**
  * バイト列から種別を決める。
- * チャット系は先頭だけをデコードし、ファイル全体は文字列にしない。
+ * readChat が false の場合、チャット系は先頭だけをデコードし、ファイル全体は文字列にしない。
  */
-export function detectLogBytes(bytes: Uint8Array): DetectResult {
+export function detectLogBytes(bytes: Uint8Array, options?: DetectOptions): DetectResult {
+  if (options?.readChat) {
+    // チャット読み取り有効時は全体をデコードして種別と内容を確認
+    return detectLogText(decodeLogBytes(bytes).text, options);
+  }
   const head = bytes.subarray(0, prefixLength(bytes));
-  const detected = detectLogText(decodeLogBytes(head).text);
+  const detected = detectLogText(decodeLogBytes(head).text, options);
   if (detected.skipBody || detected.kind !== "Unknown" || head.length === bytes.length) {
     return detected;
   }
-  return detectLogText(decodeLogBytes(bytes).text);
+  return detectLogText(decodeLogBytes(bytes).text, options);
 }

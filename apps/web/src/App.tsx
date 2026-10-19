@@ -1,13 +1,18 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { canUseDirectoryPicker, logsFromFileList, pickDirectoryWithBrowser } from "./adapters/web/logSource.ts";
 import type { ReadableLog } from "./adapters/web/logSource.ts";
 import { inspectLog } from "./importClient.ts";
+import { ChatViewer } from "./ChatViewer.tsx";
+import type { ActionCountRow, ImportSuccess } from "./workers/protocol.ts";
+import type { ChatRow } from "@meseta/core";
+import "./App.css";
 
 const ActionChart = lazy(() =>
   import("./ActionChart.tsx").then((mod) => ({ default: mod.ActionChart })),
 );
-import type { ActionCountRow, ImportSuccess } from "./workers/protocol.ts";
-import "./App.css";
+
+const LOCAL_READ_CHAT_KEY = "meseta_read_chat";
+const LOCAL_SAVED_FOLDER_KEY = "meseta_saved_log_folder";
 
 function mergeCounts(files: readonly ImportSuccess[]): ActionCountRow[] {
   const totals = new Map<string, number>();
@@ -28,46 +33,104 @@ export default function App() {
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
+  const [currentFolder, setCurrentFolder] = useState<string>("");
+  const [readChat, setReadChat] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(LOCAL_READ_CHAT_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+
   const directoryPicker = canUseDirectoryPicker();
 
-  useEffect(() => {
-    // React の型には webkitdirectory が無いブラウザ向け属性。DOM へ直接付ける。
-    folderInput.current?.setAttribute("webkitdirectory", "");
-  }, []);
+  const handleToggleReadChat = (enabled: boolean) => {
+    setReadChat(enabled);
+    try {
+      localStorage.setItem(LOCAL_READ_CHAT_KEY, String(enabled));
+    } catch {
+      // localStorage failure ignored
+    }
+  };
+
   const counts = useMemo(() => mergeCounts(files), [files]);
   const actionFiles = files.filter((file) => file.kind === "ActionLog" && !file.skipped).length;
 
-  async function load(logs: readonly ReadableLog[]) {
-    if (logs.length === 0) return;
-    setBusy(true);
-    setErrors([]);
-    setFiles([]);
-    const next: ImportSuccess[] = [];
-    const problems: string[] = [];
-    for (let index = 0; index < logs.length; index += 1) {
-      const log = logs[index];
-      if (!log) continue;
-      setProgress(`${index + 1} / ${logs.length} ファイル`);
-      try {
-        const bytes = await log.read();
-        const response = await inspectLog(log.name, bytes);
-        if (response.ok) next.push(response);
-        else problems.push(`${response.fileName}: ${response.message}`);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "読み込みに失敗しました";
-        problems.push(`${log.name}: ${message}`);
+  // 全ファイルから収集したチャット行のフラットリスト
+  const allChatRows = useMemo<ChatRow[]>(() => {
+    const list: ChatRow[] = [];
+    for (const file of files) {
+      if (file.chatRows && file.chatRows.length > 0) {
+        list.push(...file.chatRows);
       }
     }
-    setFiles(next);
-    setErrors(problems);
-    setProgress("");
-    setBusy(false);
-  }
+    return list;
+  }, [files]);
+
+  const load = useCallback(
+    async (logs: readonly ReadableLog[], folderPath?: string) => {
+      if (logs.length === 0) return;
+      setBusy(true);
+      setErrors([]);
+      setFiles([]);
+      if (folderPath) setCurrentFolder(folderPath);
+
+      const next: ImportSuccess[] = [];
+      const problems: string[] = [];
+
+      for (let index = 0; index < logs.length; index += 1) {
+        const log = logs[index];
+        if (!log) continue;
+        setProgress(`${index + 1} / ${logs.length} ファイル`);
+        try {
+          const bytes = await log.read();
+          const response = await inspectLog(log.name, bytes, readChat);
+          if (response.ok) next.push(response);
+          else problems.push(`${response.fileName}: ${response.message}`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "読み込みに失敗しました";
+          problems.push(`${log.name}: ${message}`);
+        }
+      }
+
+      setFiles(next);
+      setErrors(problems);
+      setProgress("");
+      setBusy(false);
+    },
+    [readChat],
+  );
+
+  // Tauri（ポータブル版）起動時の自動読み取り
+  useEffect(() => {
+    folderInput.current?.setAttribute("webkitdirectory", "");
+
+    if (import.meta.env.MODE === "tauri") {
+      void (async () => {
+        try {
+          const desktop = await import("./adapters/tauri/logSource.ts");
+          const saved = localStorage.getItem(LOCAL_SAVED_FOLDER_KEY);
+          if (saved) {
+            setCurrentFolder(saved);
+            const logs = await desktop.scanDirectoryLogs(saved);
+            if (logs.length > 0) {
+              await load(logs, saved);
+            }
+          }
+        } catch {
+          // 自動読み取り失敗時は手動操作を待つ
+        }
+      })();
+    }
+  }, [load]);
 
   async function chooseDirectory() {
     if (import.meta.env.MODE === "tauri") {
       const desktop = await import("./adapters/tauri/logSource.ts");
-      await load(await desktop.pickTauriLogs("directory"));
+      const res = await desktop.pickAndSaveDirectoryLogs();
+      if (res.files.length > 0) {
+        await load(res.files, res.folderPath ?? undefined);
+      }
       return;
     }
     if (!directoryPicker) {
@@ -98,7 +161,7 @@ export default function App() {
         <p className="eyebrow">PSO2 NGS / PC</p>
         <h1>メセタ帳</h1>
         <p className="lede">
-          公式ログをこのブラウザの中だけで読み、ActionLog の行数を数えます。サーバーには送りません。
+          公式ログをローカルだけで読み、ActionLogの集計やチャット履歴を確認できます。外部サーバーには一切送信しません。
         </p>
       </header>
 
@@ -108,7 +171,7 @@ export default function App() {
           PHANTASY STAR ONLINE 2 NEW GENESIS （C）SEGA ／{" "}
           <a href="https://pso2.jp/players/">公式サイト</a>
         </p>
-        <p>チャット系のログは種別の判定だけして、本文は読みません。</p>
+        <p>チャット履歴の読み取りはオプトイン制です（既定では本文を読みません）。</p>
       </section>
 
       <section className="panel">
@@ -119,6 +182,21 @@ export default function App() {
           <button type="button" onClick={() => void chooseDirectory()} disabled={busy}>
             フォルダを選ぶ
           </button>
+          {currentFolder && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (import.meta.env.MODE === "tauri") {
+                  const desktop = await import("./adapters/tauri/logSource.ts");
+                  const logs = await desktop.scanDirectoryLogs(currentFolder);
+                  await load(logs, currentFolder);
+                }
+              }}
+              disabled={busy}
+            >
+              🔄 再読み込み
+            </button>
+          )}
           <input
             ref={fileInput}
             type="file"
@@ -142,14 +220,28 @@ export default function App() {
             }}
           />
         </div>
-        <p className="hint">
-          {directoryPicker
-            ? "このブラウザはフォルダを直接選べます。ファイルをこの画面へドロップしても読めます。"
-            : "このブラウザはフォルダの直接選択に対応していないため、フォルダ選択ではファイル一覧の入力を使います。"}
-          ログの場所の目安は「ドキュメント\SEGA\PHANTASYSTARONLINE2\log」です。
-        </p>
+
+        {currentFolder ? (
+          <p className="current-folder">
+            現在のログフォルダ: <code>{currentFolder}</code>
+          </p>
+        ) : (
+          <p className="hint">
+            {directoryPicker
+              ? "フォルダを指定すると次回以降自動で読み込みます。ファイルをこの画面へドロップしても読めます。"
+              : "フォルダ選択からログフォルダ（ドキュメント\\SEGA\\PHANTASYSTARONLINE2\\log）を選んでください。"}
+          </p>
+        )}
+
         {busy && <p className="progress">{progress || "読み込んでいます…"}</p>}
       </section>
+
+      {/* チャット履歴確認セクション */}
+      <ChatViewer
+        chatRows={allChatRows}
+        readChat={readChat}
+        onToggleReadChat={handleToggleReadChat}
+      />
 
       {errors.length > 0 && (
         <section className="errors" role="alert">
@@ -181,9 +273,12 @@ export default function App() {
                   <span>{file.kindLabel}</span>
                 </header>
                 {file.skipped ? (
-                  <p>チャット系のため、本文は読んでいません。</p>
+                  <p>チャット読み取りがオフのため、本文は読んでいません。</p>
                 ) : (
-                  <p>日時のある行: {file.dataLineCount}</p>
+                  <p>
+                    日時のある行: {file.dataLineCount}
+                    {file.chatRows ? ` (チャット: ${file.chatRows.length} 件)` : ""}
+                  </p>
                 )}
                 {file.heldPartial && <p>末尾の未完成行は、今回の集計に入れていません。</p>}
                 {file.actionCounts.length > 0 && (

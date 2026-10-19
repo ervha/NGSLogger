@@ -7,7 +7,11 @@ function workerUrl(): Worker {
 }
 
 /** 1 ファイルを Worker で読む。バイト列は画面側に残さないよう、移譲して渡す。 */
-export function inspectLog(fileName: string, bytes: Uint8Array): Promise<ImportResponse> {
+export function inspectLog(
+  fileName: string,
+  bytes: Uint8Array,
+  readChat = false,
+): Promise<ImportResponse> {
   const id = nextId;
   nextId += 1;
   const worker = workerUrl();
@@ -23,7 +27,7 @@ export function inspectLog(fileName: string, bytes: Uint8Array): Promise<ImportR
       worker.terminate();
       reject(new Error(`${fileName} を読めませんでした`));
     };
-    const request: ImportRequest = { id, fileName, bytes: copy };
+    const request: ImportRequest = { id, fileName, bytes: copy, readChat };
     worker.postMessage(request, [copy]);
   });
 }
