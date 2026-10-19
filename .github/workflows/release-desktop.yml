@@ -70,6 +70,16 @@ jobs:
           Write-Host "作成完了: $zipPath"
           Write-Host "SHA-256: $hash"
 
+      - name: zip と SHA-256 をアーティファクトとして保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows-x64
+          path: |
+            dist-release/*.zip
+            dist-release/*.sha256
+          retention-days: 7
+          if-no-files-found: error
+
       - name: GitHub Release へのアップロード
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
@@ -77,6 +87,7 @@ jobs:
           files: |
             dist-release/*.zip
             dist-release/*.sha256
-          draft: false
+          # draft on purpose; publish manually only after checking.
+          draft: true
           prerelease: false
           generate_release_notes: true
