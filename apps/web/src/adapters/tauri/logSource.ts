@@ -79,8 +79,9 @@ export async function pickAndSaveDirectoryLogs(): Promise<{
   try {
     // 記録した表記（\\?\ を外したもの）を、このセッションの読み取りにも使う。
     folderPath = await invoke<string>("remember_log_directory", { path: selected });
-  } catch {
-    // 記録に失敗しても、このセッションはダイアログが足したスコープで読める。
+  } catch (error) {
+    // このセッションはダイアログが足したスコープで読める。記録だけ失敗している。
+    console.warn("ログフォルダを記録できませんでした", error);
   }
 
   try {

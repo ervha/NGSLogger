@@ -185,16 +185,45 @@ fn parse_remembered_log_folder(text: &str) -> Option<PathBuf> {
 }
 
 /// 記録してよいのは、実在するフォルダで、ダイアログがすでにスコープへ足したものだけ。
-fn persisted_directory_is_acceptable(path: &Path, already_allowed: bool) -> Result<(), String> {
+fn persisted_directory_is_acceptable(
+    path: &Path,
+    already_allowed: bool,
+    dialog_path: &str,
+    dialog_path_is_allowed: bool,
+) -> Result<(), String> {
     if !path.is_dir() {
-        return Err("フォルダではありません".to_string());
+        return Err(format!("フォルダではありません: {}", path.display()));
     }
     if !already_allowed {
-        return Err(
-            "このフォルダは許可されていません。フォルダ選択ダイアログで選んでください".to_string(),
-        );
+        return Err(directory_not_in_scope_message(
+            dialog_path,
+            path,
+            dialog_path_is_allowed,
+        ));
     }
     Ok(())
+}
+
+/// `is_allowed` が拒否した理由。`\\?\` を外したあとや、リンク先へ解決したあとのパスを残す。
+fn directory_not_in_scope_message(
+    dialog_path: &str,
+    checked: &Path,
+    dialog_path_is_allowed: bool,
+) -> String {
+    let checked = checked.to_string_lossy();
+    if dialog_path == checked.as_ref() {
+        return format!(
+            "このフォルダは許可されていません。フォルダ選択ダイアログで選んでください: {checked}"
+        );
+    }
+    if dialog_path_is_allowed {
+        return format!(
+            r"このフォルダは許可されていません。ダイアログのパス「{dialog_path}」はスコープにありますが、解決したパス「{checked}」は一致しません。\\?\ を外した表記や、ジャンクションのリンク先がスコープと違うときに起きます。"
+        );
+    }
+    format!(
+        "このフォルダは許可されていません。ダイアログのパス「{dialog_path}」、解決したパス「{checked}」。フォルダ選択ダイアログで選んでください。"
+    )
 }
 
 fn remembered_log_folder_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -278,9 +307,12 @@ fn get_portable_dir() -> Result<PortableDir, String> {
 /// 画面から任意のパスを足すことはできない。
 #[tauri::command]
 fn remember_log_directory(app: tauri::AppHandle, path: String) -> Result<String, String> {
-    let normalized = normalize_existing_dir(Path::new(&path))
-        .ok_or_else(|| "フォルダを確認できません".to_string())?;
-    persisted_directory_is_acceptable(&normalized, app.fs_scope().is_allowed(&normalized))?;
+    let normalized = normalize_existing_dir(Path::new(&path)).ok_or_else(|| {
+        format!("フォルダを確認できません（存在しないか、canonicalize に失敗しました）: {path}")
+    })?;
+    let normalized_allowed = app.fs_scope().is_allowed(&normalized);
+    let dialog_allowed = normalized_allowed || app.fs_scope().is_allowed(Path::new(&path));
+    persisted_directory_is_acceptable(&normalized, normalized_allowed, &path, dialog_allowed)?;
     // ダイアログが `\\?\` 付きで許可していても、記録と同じ表記をスコープへ足す。
     let _ = app.fs_scope().allow_directory(&normalized, true);
     let file = remembered_log_folder_file(&app)?;
@@ -362,9 +394,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        display_log_path, format_remembered_log_folder, normalize_existing_dir,
-        official_log_dir_from, parse_remembered_log_folder, persisted_directory_is_acceptable,
-        simplify_verbatim_path,
+        directory_not_in_scope_message, display_log_path, format_remembered_log_folder,
+        normalize_existing_dir, official_log_dir_from, parse_remembered_log_folder,
+        persisted_directory_is_acceptable, simplify_verbatim_path,
     };
 
     #[test]
@@ -507,17 +539,40 @@ mod tests {
     }
 
     #[test]
+    fn scope_rejection_names_the_dialog_path_and_the_resolved_path() {
+        let dialog = r"\\?\C:\Users\alice\OneDrive\Documents\SEGA\PHANTASYSTARONLINE2\log";
+        let checked =
+            std::path::Path::new(r"C:\Users\alice\OneDrive\Documents\SEGA\PHANTASYSTARONLINE2\log");
+        let when_verbatim_was_allowed = directory_not_in_scope_message(dialog, checked, true);
+        assert!(when_verbatim_was_allowed.contains(dialog));
+        assert!(when_verbatim_was_allowed.contains(checked.to_str().unwrap()));
+        assert!(when_verbatim_was_allowed.contains("ジャンクション"));
+
+        let when_neither_was_allowed = directory_not_in_scope_message(dialog, checked, false);
+        assert!(when_neither_was_allowed.contains(dialog));
+        assert!(when_neither_was_allowed.contains(checked.to_str().unwrap()));
+        assert!(!when_neither_was_allowed.contains("ジャンクション"));
+
+        let same = directory_not_in_scope_message(checked.to_str().unwrap(), checked, false);
+        assert!(same.contains(checked.to_str().unwrap()));
+        assert!(!same.contains(dialog));
+    }
+
+    #[test]
     fn only_an_allowed_directory_can_be_remembered() {
         let dir = std::env::temp_dir().join(format!("meseta-ledger-scope-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("not-a-dir.txt");
         std::fs::write(&file, b"x").unwrap();
 
-        assert!(persisted_directory_is_acceptable(&dir, true).is_ok());
-        assert!(persisted_directory_is_acceptable(&dir, false).is_err());
-        assert!(persisted_directory_is_acceptable(&file, true).is_err());
+        let dialog = dir.to_str().unwrap();
+        assert!(persisted_directory_is_acceptable(&dir, true, dialog, true).is_ok());
+        assert!(persisted_directory_is_acceptable(&dir, false, dialog, false).is_err());
+        assert!(persisted_directory_is_acceptable(&file, true, dialog, true).is_err());
         assert!(persisted_directory_is_acceptable(
             std::path::Path::new("/no/such/meseta/dir"),
+            true,
+            "/no/such/meseta/dir",
             true
         )
         .is_err());
