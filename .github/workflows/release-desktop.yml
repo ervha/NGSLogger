@@ -87,7 +87,6 @@ jobs:
           files: |
             dist-release/*.zip
             dist-release/*.sha256
-          # draft on purpose; publish manually only after checking.
-          draft: true
+          draft: false
           prerelease: false
           generate_release_notes: true
