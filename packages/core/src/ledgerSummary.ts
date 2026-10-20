@@ -1,8 +1,9 @@
 /**
- * ActionLedger から日別収支やマイショップ売却サマリーを集計する。
+ * ActionLedger から日別収支やマイショップ売却サマリー、セッション時給、売れ筋ランキングを集計する。
  */
 
 import type { ActionLedger } from "./estimateSales.ts";
+import type { ActionRow } from "./parseAction.ts";
 
 export interface DailySummary {
   /** YYYY-MM-DD */
@@ -34,6 +35,28 @@ export interface ShopSummary {
   totalFeePaid: number;
 }
 
+export interface PlaySession {
+  id: string;
+  startTime: string;
+  endTime: string;
+  durationMinutes: number;
+  income: number;
+  expense: number;
+  net: number;
+  hourlyNet: number;
+  hourlyIncome: number;
+  actionCount: number;
+}
+
+export interface ItemSalesRanking {
+  itemName: string;
+  totalQuantity: number;
+  totalGross: number;
+  averagePrice: number;
+  minPrice: number;
+  maxPrice: number;
+}
+
 export interface LedgerAnalytics {
   daily: DailySummary[];
   shopSummary: ShopSummary;
@@ -47,6 +70,8 @@ export interface LedgerAnalytics {
     items: string[];
     isCertain: boolean;
   }[];
+  sessions: PlaySession[];
+  itemRankings: ItemSalesRanking[];
 }
 
 /**
@@ -69,7 +94,149 @@ export function getBoundaryDate(timestamp: string, boundaryHour = 0): string {
   return datePart;
 }
 
-export function summarizeLedger(ledger: ActionLedger, dayBoundaryHour = 0): LedgerAnalytics {
+function parseTimestampMs(ts: string): number {
+  const parsed = Date.parse(ts);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function getMesetaAmount(row: ActionRow): number {
+  const val = row.values["N-Meseta"] ?? row.values["Meseta"];
+  return typeof val === "number" ? Math.abs(val) : 0;
+}
+
+/**
+ * アクション行からプレイセッションを推定・集計する。
+ * 行の間隔が gapThresholdMinutes（既定30分）を超えたら新セッションとする。
+ */
+export function buildPlaySessions(
+  rows: readonly ActionRow[],
+  gapThresholdMinutes = 30,
+): PlaySession[] {
+  if (rows.length === 0) return [];
+
+  const sorted = [...rows].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const gapMs = gapThresholdMinutes * 60 * 1000;
+  const sessions: PlaySession[] = [];
+
+  let currentStart = sorted[0]?.timestamp ?? "";
+  let currentEnd = sorted[0]?.timestamp ?? "";
+  let currentStartMs = parseTimestampMs(currentStart);
+  let currentEndMs = currentStartMs;
+  let income = 0;
+  let expense = 0;
+  let actionCount = 0;
+
+  function pushCurrent() {
+    const durationMinutes = Math.max(1, Math.round((currentEndMs - currentStartMs) / 60000));
+    const hours = durationMinutes / 60;
+    const net = income - expense;
+    sessions.push({
+      id: `${currentStart}_${currentEnd}`,
+      startTime: currentStart,
+      endTime: currentEnd,
+      durationMinutes,
+      income,
+      expense,
+      net,
+      hourlyNet: Math.round(net / hours),
+      hourlyIncome: Math.round(income / hours),
+      actionCount,
+    });
+  }
+
+  for (const row of sorted) {
+    const rowMs = parseTimestampMs(row.timestamp);
+    if (rowMs - currentEndMs > gapMs) {
+      pushCurrent();
+      currentStart = row.timestamp;
+      currentStartMs = rowMs;
+      income = 0;
+      expense = 0;
+      actionCount = 0;
+    }
+
+    currentEnd = row.timestamp;
+    currentEndMs = rowMs;
+    actionCount += 1;
+
+    const amount = getMesetaAmount(row);
+    if (
+      row.action === "[ShopTakes]" ||
+      row.action === "[ExchangeItem]" ||
+      row.action === "[DiscradExchange]"
+    ) {
+      income += amount;
+    } else if (
+      row.action === "[ShopBuy]" ||
+      row.action === "[BuyItem]" ||
+      row.action === "[ProduceItem]"
+    ) {
+      expense += amount;
+    }
+  }
+
+  pushCurrent();
+  return sessions.reverse(); // 直近セッションを上に
+}
+
+/**
+ * マイショップ推定売却ログから売れ筋アイテムを集計・ランキング化する。
+ */
+export function rankSoldItems(ledger: ActionLedger): ItemSalesRanking[] {
+  const map = new Map<
+    string,
+    { quantity: number; totalGross: number; minPrice: number; maxPrice: number }
+  >();
+
+  for (const match of ledger.saleMatches) {
+    const items =
+      match.candidates.length === 1
+        ? match.candidates[0]
+        : match.commonItems.length > 0
+          ? match.commonItems
+          : undefined;
+
+    if (!items) continue;
+
+    for (const item of items) {
+      let stat = map.get(item.itemName);
+      if (!stat) {
+        stat = {
+          quantity: 0,
+          totalGross: 0,
+          minPrice: item.price,
+          maxPrice: item.price,
+        };
+        map.set(item.itemName, stat);
+      }
+      stat.quantity += 1;
+      stat.totalGross += item.price;
+      if (item.price < stat.minPrice) stat.minPrice = item.price;
+      if (item.price > stat.maxPrice) stat.maxPrice = item.price;
+    }
+  }
+
+  const result: ItemSalesRanking[] = [];
+  for (const [itemName, stat] of map.entries()) {
+    result.push({
+      itemName,
+      totalQuantity: stat.quantity,
+      totalGross: stat.totalGross,
+      averagePrice: Math.round(stat.totalGross / stat.quantity),
+      minPrice: stat.minPrice,
+      maxPrice: stat.maxPrice,
+    });
+  }
+
+  // 総売上額降順（同額なら販売数降順）
+  return result.sort((a, b) => b.totalGross - a.totalGross || b.totalQuantity - a.totalQuantity);
+}
+
+export function summarizeLedger(
+  ledger: ActionLedger,
+  dayBoundaryHour = 0,
+  rawRows?: readonly ActionRow[],
+): LedgerAnalytics {
   const dailyMap = new Map<string, DailySummary>();
 
   function getOrCreateDay(date: string): DailySummary {
@@ -167,11 +334,14 @@ export function summarizeLedger(ledger: ActionLedger, dayBoundaryHour = 0): Ledg
     return {
       takenAt: m.take.timestamp,
       amount: m.take.amount,
-      gross: Math.round(m.gross),
+      gross: m.gross,
       items,
       isCertain: m.candidates.length === 1 || m.commonItems.length > 0,
     };
   });
+
+  const sessions = rawRows ? buildPlaySessions(rawRows) : [];
+  const itemRankings = rankSoldItems(ledger);
 
   return {
     daily,
@@ -180,5 +350,7 @@ export function summarizeLedger(ledger: ActionLedger, dayBoundaryHour = 0): Ledg
     totalExpense,
     totalNet: totalIncome - totalExpense,
     recentSales,
+    sessions,
+    itemRankings,
   };
 }

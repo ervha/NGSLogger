@@ -7,6 +7,7 @@
 
 export interface ReadableLog {
   name: string;
+  size?: number;
   read(): Promise<Uint8Array>;
 }
 
@@ -54,6 +55,7 @@ export async function pickDirectoryWithBrowser(): Promise<ReadableLog[]> {
 export function logsFromFileList(list: FileList | readonly File[]): ReadableLog[] {
   return [...list].map((file) => ({
     name: file.webkitRelativePath || file.name,
+    size: file.size,
     read: async () => new Uint8Array(await file.arrayBuffer()),
   }));
 }

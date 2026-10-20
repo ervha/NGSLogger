@@ -8,6 +8,7 @@ import type { ActionCountRow, ImportSuccess } from "./workers/protocol.ts";
 import { buildLedger, summarizeLedger } from "@meseta/core";
 import type { ActionRow, ChatRow } from "@meseta/core";
 import { OFFICIAL_SITE_URL } from "./officialSite.ts";
+import { buildCacheKey, getCachedParsedLog, setCachedParsedLog } from "./cache/logCache.ts";
 import "./App.css";
 
 const ActionChart = lazy(() =>
@@ -21,6 +22,7 @@ const MesetaDashboard = lazy(() =>
 const LOCAL_READ_CHAT_KEY = "meseta_read_chat";
 const LOCAL_SAVED_FOLDER_KEY = "meseta_saved_log_folder";
 const LOCAL_AUTO_WATCH_KEY = "meseta_auto_watch";
+const LOCAL_COMPACT_KEY = "meseta_compact_mode";
 
 function mergeCounts(files: readonly ImportSuccess[]): ActionCountRow[] {
   const totals = new Map<string, number>();
@@ -38,6 +40,7 @@ export default function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const backupInput = useRef<HTMLInputElement>(null);
+  const snapshotRef = useRef<string>("");
 
   const [files, setFiles] = useState<ImportSuccess[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
@@ -46,6 +49,14 @@ export default function App() {
   const [currentFolder, setCurrentFolder] = useState<string>("");
   const [rememberNotice, setRememberNotice] = useState(0);
   const [activeTab, setActiveTab] = useState<"dashboard" | "chat" | "files">("dashboard");
+
+  const [compact, setCompact] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(LOCAL_COMPACT_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
 
   const [autoWatch, setAutoWatch] = useState<boolean>(() => {
     try {
@@ -63,7 +74,16 @@ export default function App() {
     }
   });
 
-  const directoryPicker = canUseDirectoryPicker();
+  const directoryPicker = useMemo(() => canUseDirectoryPicker(), []);
+
+  const handleToggleCompact = (enabled: boolean) => {
+    setCompact(enabled);
+    try {
+      localStorage.setItem(LOCAL_COMPACT_KEY, String(enabled));
+    } catch {
+      // ignore
+    }
+  };
 
   const handleToggleReadChat = (enabled: boolean) => {
     setReadChat(enabled);
@@ -97,11 +117,11 @@ export default function App() {
     return rows;
   }, [files]);
 
-  // メセタ分析データ（収支・マイショップ売却推定）
+  // メセタ分析データ（収支・マイショップ売却推定・セッション時給・売れ筋ランキング）
   const analytics = useMemo(() => {
     if (allActionRows.length === 0) return null;
     const ledger = buildLedger(allActionRows);
-    return summarizeLedger(ledger, 0);
+    return summarizeLedger(ledger, 0, allActionRows);
   }, [allActionRows]);
 
   // 全チャット行
@@ -133,10 +153,33 @@ export default function App() {
         if (!log) continue;
         if (!silent) setProgress(`${index + 1} / ${logs.length} ファイル`);
         try {
+          // 1. サイズ既知の場合、キャッシュを事前確認
+          if (typeof log.size === "number") {
+            const cacheKey = buildCacheKey(log.name, log.size, readChat);
+            const cached = await getCachedParsedLog(cacheKey);
+            if (cached) {
+              next.push(cached);
+              continue;
+            }
+          }
+
+          // 2. キャッシュ未ヒット時は実読み取り
           const bytes = await log.read();
+          const size = log.size ?? bytes.byteLength;
+          const cacheKey = buildCacheKey(log.name, size, readChat);
+          const cached = await getCachedParsedLog(cacheKey);
+          if (cached) {
+            next.push(cached);
+            continue;
+          }
+
           const response = await inspectLog(log.name, bytes, readChat);
-          if (response.ok) next.push(response);
-          else problems.push(`${response.fileName}: ${response.message}`);
+          if (response.ok) {
+            next.push(response);
+            void setCachedParsedLog(cacheKey, log.name, size, readChat, response);
+          } else {
+            problems.push(`${response.fileName}: ${response.message}`);
+          }
         } catch (error) {
           const message = error instanceof Error ? error.message : "読み込みに失敗しました";
           problems.push(`${log.name}: ${message}`);
@@ -186,7 +229,7 @@ export default function App() {
     }
   }, [load]);
 
-  // リアルタイム自動監視（Tauri 版でログフォルダが指定されている場合、一定間隔で自動再スキャン）
+  // リアルタイム自動監視（Tauri 版でログフォルダが指定されている場合、軽量スナップショットで更新検知）
   useEffect(() => {
     if (import.meta.env.MODE !== "tauri" || !currentFolder || !autoWatch) return;
 
@@ -196,28 +239,32 @@ export default function App() {
     const poll = async () => {
       try {
         const desktop = await import("./adapters/tauri/logSource.ts");
-        const logs = await desktop.scanDirectoryLogs(currentFolder);
-        if (mounted && logs.length > 0) {
-          // 既存ファイル数と異なればサイレント再読込
-          if (logs.length !== files.length) {
-            await load(logs, currentFolder, true);
+        const snap = await desktop.getDirectorySnapshot(currentFolder);
+        if (snap) {
+          const snapKey = `${snap.fileCount}:${snap.totalSize}:${snap.latestFileName ?? ""}:${snap.latestFileSize ?? 0}`;
+          if (snapshotRef.current && snapshotRef.current !== snapKey) {
+            const logs = await desktop.scanDirectoryLogs(currentFolder);
+            if (mounted && logs.length > 0) {
+              await load(logs, currentFolder, true);
+            }
           }
+          snapshotRef.current = snapKey;
         }
       } catch {
         // ignore
       }
       if (mounted) {
-        timer = window.setTimeout(poll, 6000);
+        timer = window.setTimeout(poll, 4000);
       }
     };
 
-    timer = window.setTimeout(poll, 6000);
+    timer = window.setTimeout(poll, 4000);
 
     return () => {
       mounted = false;
       if (timer) clearTimeout(timer);
     };
-  }, [currentFolder, autoWatch, files.length, load]);
+  }, [currentFolder, autoWatch, load]);
 
   useEffect(() => {
     if (rememberNotice === 0) return;
@@ -249,24 +296,90 @@ export default function App() {
     }
   }
 
-  const handleBackupImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  async function handleBackupImport(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
     if (!file) return;
     try {
       const backup = await parseBackupFile(file);
+      const settings = backup.settings as { savedFolder?: string; readChat?: boolean } | undefined;
+      if (settings?.savedFolder) setCurrentFolder(settings.savedFolder);
+      if (typeof settings?.readChat === "boolean") handleToggleReadChat(settings.readChat);
       setFiles(backup.files);
       setErrors([]);
-      alert(`バックアップから ${backup.files.length} ファイルの集計データを復元しました。`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "復元に失敗しました";
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "バックアップの復元に失敗しました";
       setErrors([msg]);
+    } finally {
+      event.target.value = "";
     }
-    e.target.value = "";
-  };
+  }
+
+  // コンパクト表示（ミニウィジェット）
+  if (compact) {
+    const today = new Date().toISOString().slice(0, 10);
+    const todaySummary = analytics?.daily.find((d) => d.date === today);
+    const latestSession = analytics?.sessions[0];
+
+    return (
+      <main className="compact-widget">
+        <div className="compact-header">
+          <span className="compact-title">メセタ帳 ミニ</span>
+          <button
+            type="button"
+            className="compact-expand-btn"
+            onClick={() => handleToggleCompact(false)}
+            title="通常表示に戻す"
+          >
+            🗖 通常画面
+          </button>
+        </div>
+
+        <div className="compact-body">
+          <div className="compact-kpi">
+            <span className="compact-label">当日純利益 ({today})</span>
+            <span
+              className={`compact-val ${
+                todaySummary ? (todaySummary.net >= 0 ? "positive" : "negative") : "neutral"
+              }`}
+            >
+              {todaySummary ? (todaySummary.net > 0 ? "+" : "") : ""}
+              {(todaySummary?.net ?? 0).toLocaleString()} <small>N-メセタ</small>
+            </span>
+          </div>
+
+          <div className="compact-kpi-sub">
+            <span>収入: +{(todaySummary?.income ?? 0).toLocaleString()}</span>
+            <span>支出: -{(todaySummary?.expense ?? 0).toLocaleString()}</span>
+          </div>
+
+          {latestSession && (
+            <div className="compact-session">
+              <span className="compact-session-label">直近セッション時給</span>
+              <span className={`compact-session-val ${latestSession.hourlyNet >= 0 ? "positive" : "negative"}`}>
+                {latestSession.hourlyNet > 0 ? "+" : ""}
+                {latestSession.hourlyNet.toLocaleString()} N-メセタ/h
+              </span>
+              <span className="compact-session-time">
+                ({latestSession.durationMinutes}分間プレイ / 純利: {latestSession.net > 0 ? "+" : ""}
+                {latestSession.net.toLocaleString()})
+              </span>
+            </div>
+          )}
+
+          {currentFolder && (
+            <div className="compact-status">
+              <span className="status-dot online" />
+              <span>{autoWatch ? "リアルタイム監視中" : "監視停止中"}</span>
+            </div>
+          )}
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <div
-      className="page"
+    <main
+      className="container"
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault();
@@ -280,8 +393,16 @@ export default function App() {
             <p className="eyebrow">PSO2 NGS / PC</p>
             <h1>メセタ帳</h1>
           </div>
-          {/* バックアップ・エクスポート操作 */}
+          {/* バックアップ・エクスポート・ミニ表示操作 */}
           <div className="backup-actions">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => handleToggleCompact(true)}
+              title="ゲームプレイ中に便利なコンパクト表示モードに切り替えます"
+            >
+              🗗 ミニ表示
+            </button>
             <button
               type="button"
               className="btn-secondary"
@@ -412,7 +533,7 @@ export default function App() {
           <p className="hint">
             {directoryPicker
               ? "フォルダを指定すると次回以降自動で読み込みます。ファイルをこの画面へドロップしても読めます。"
-              : "フォルダ選択からログフォルダ（ドキュメント\\SEGA\\PHANTASYSTARONLINE2\\log）を選んでください。"}
+              : "フォルダ選択からログフォルダ（ドキュメント\\SEGA\\PHANTASYSTARONLINE2\\log_ngs）を選んでください。"}
           </p>
         )}
 
@@ -426,7 +547,7 @@ export default function App() {
           className={`tab-btn ${activeTab === "dashboard" ? "active" : ""}`}
           onClick={() => setActiveTab("dashboard")}
         >
-          📊 メセタ収支・売却分析
+          📊 メセタ収支・プレイ分析
         </button>
         <button
           type="button"
@@ -452,31 +573,27 @@ export default function App() {
         </section>
       )}
 
-      {/* タブコンテンツ 1: ダッシュボード */}
+      {/* タブコンテンツ */}
       {activeTab === "dashboard" && (
         <>
           {analytics ? (
-            <Suspense fallback={<p className="hint">ダッシュボードを準備しています…</p>}>
+            <Suspense fallback={<p className="loading">ダッシュボードを読み込み中…</p>}>
               <MesetaDashboard analytics={analytics} />
             </Suspense>
           ) : (
-            <section className="panel empty-state">
-              <p>ログを読み込むと、ここに日別収支グラフやマイショップ売却レポートが表示されます。</p>
+            <section className="empty-dashboard">
+              <p>ログファイルを読み込むと、ここにメセタ収支やマイショップ売却推移が表示されます。</p>
             </section>
           )}
 
-          {counts.length > 0 && (
-            <section className="panel">
-              <h3>アクション別発生回数</h3>
-              <Suspense fallback={<p className="hint">グラフを準備しています…</p>}>
-                <ActionChart counts={counts} />
-              </Suspense>
-            </section>
+          {actionFiles > 0 && (
+            <Suspense fallback={<p className="loading">グラフを準備中…</p>}>
+              <ActionChart counts={counts} />
+            </Suspense>
           )}
         </>
       )}
 
-      {/* タブコンテンツ 2: チャット履歴 */}
       {activeTab === "chat" && (
         <ChatViewer
           chatRows={allChatRows}
@@ -485,56 +602,31 @@ export default function App() {
         />
       )}
 
-      {/* タブコンテンツ 3: 読み込みファイル一覧 */}
       {activeTab === "files" && (
-        <section className="panel">
-          <div className="summary">
-            <p>
-              {files.length} ファイルを読みました。ActionLog は {actionFiles} ファイル、アクション行は{" "}
-              {counts.reduce((sum, row) => sum + row.count, 0)} 行です。
-            </p>
-            <p className="hint">メセタが動く操作は、アイテム行と金額行の 2 行で 1 組です。</p>
-          </div>
-          <div className="file-list">
-            {files.map((file) => (
-              <article key={file.fileName} className="file-card">
-                <header>
-                  <h2>{file.fileName}</h2>
-                  <span>{file.kindLabel}</span>
-                </header>
-                {file.skipped ? (
-                  <p>チャット読み取りがオフのため、本文は読んでいません。</p>
-                ) : (
-                  <p>
-                    日時のある行: {file.dataLineCount}
-                    {file.chatRows ? ` (チャット: ${file.chatRows.length} 件)` : ""}
-                  </p>
-                )}
-                {file.heldPartial && <p>末尾の未完成行は、今回の集計に入れていません。</p>}
-                {file.actionCounts.length > 0 && (
-                  <table>
-                    <caption>アクションごとの行数</caption>
-                    <thead>
-                      <tr>
-                        <th>アクション</th>
-                        <th>行数</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {file.actionCounts.map((row) => (
-                        <tr key={row.action}>
-                          <td>{row.action}</td>
-                          <td>{row.count}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </article>
-            ))}
-          </div>
+        <section className="summary" aria-label="読み込み結果">
+          <h2>読み込みファイル一覧</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>ファイル名</th>
+                <th>種類</th>
+                <th>行数</th>
+                <th>状態</th>
+              </tr>
+            </thead>
+            <tbody>
+              {files.map((file) => (
+                <tr key={file.fileName}>
+                  <td>{file.fileName}</td>
+                  <td>{file.kind}</td>
+                  <td>{file.dataLineCount}</td>
+                  <td>{file.skipped ? "集計対象外（スキップ）" : "解析完了"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
-    </div>
+    </main>
   );
 }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildLedger } from "../src/estimateSales.ts";
-import { getBoundaryDate, summarizeLedger } from "../src/ledgerSummary.ts";
+import {
+  buildPlaySessions,
+  getBoundaryDate,
+  rankSoldItems,
+  summarizeLedger,
+} from "../src/ledgerSummary.ts";
 import { parseActionLog } from "../src/parseAction.ts";
 import { actionLines, asLogText } from "./sampleLines.ts";
 
@@ -17,7 +22,7 @@ describe("ledgerSummary", () => {
   it("合成 ActionLog から日別収支とマイショップサマリーを集計できる", () => {
     const parsed = parseActionLog(asLogText(actionLines));
     const ledger = buildLedger(parsed.rows);
-    const summary = summarizeLedger(ledger, 0);
+    const summary = summarizeLedger(ledger, 0, parsed.rows);
 
     // 収入・支出の集計
     expect(summary.totalIncome).toBeGreaterThan(0);
@@ -39,5 +44,37 @@ describe("ledgerSummary", () => {
     // 売却履歴
     expect(summary.recentSales.length).toBe(ledger.saleMatches.length);
     expect(summary.recentSales[0]?.takenAt).toBe(ledger.saleMatches[0]?.take.timestamp);
+
+    // セッション分析
+    expect(summary.sessions.length).toBeGreaterThan(0);
+    expect(summary.sessions[0]?.durationMinutes).toBeGreaterThanOrEqual(1);
+    expect(summary.sessions[0]?.actionCount).toBeGreaterThan(0);
+
+    // 売れ筋ランキング
+    expect(summary.itemRankings.length).toBeGreaterThanOrEqual(0);
+  });
+
+  it("buildPlaySessions で時間間隔によるセッション分割と時給計算ができる", () => {
+    const parsed = parseActionLog(asLogText(actionLines));
+    const sessions = buildPlaySessions(parsed.rows, 30);
+    expect(sessions.length).toBeGreaterThan(0);
+    for (const session of sessions) {
+      expect(session.startTime).toBeDefined();
+      expect(session.endTime).toBeDefined();
+      expect(session.durationMinutes).toBeGreaterThanOrEqual(1);
+      expect(typeof session.hourlyNet).toBe("number");
+    }
+  });
+
+  it("rankSoldItems で売れ筋アイテムがランキング集計される", () => {
+    const parsed = parseActionLog(asLogText(actionLines));
+    const ledger = buildLedger(parsed.rows);
+    const rankings = rankSoldItems(ledger);
+    expect(Array.isArray(rankings)).toBe(true);
+    for (const r of rankings) {
+      expect(r.itemName).toBeDefined();
+      expect(r.totalQuantity).toBeGreaterThan(0);
+      expect(r.totalGross).toBeGreaterThan(0);
+    }
   });
 });

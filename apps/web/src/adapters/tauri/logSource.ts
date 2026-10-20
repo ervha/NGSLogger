@@ -6,7 +6,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { exists, readDir, readFile } from "@tauri-apps/plugin-fs";
+import { exists, readDir, readFile, stat } from "@tauri-apps/plugin-fs";
 import type { ReadableLog } from "../web/logSource.ts";
 
 export const SAVED_LOG_FOLDER_KEY = "meseta_saved_log_folder";
@@ -17,11 +17,19 @@ function joinPath(dir: string, name: string): string {
   return dir.endsWith(separator) ? `${dir}${name}` : `${dir}${separator}${name}`;
 }
 
-async function asReadable(path: string): Promise<ReadableLog> {
+async function asReadable(path: string, size?: number): Promise<ReadableLog> {
   const name = path.split(/[/\\\\]/).pop() || path;
+  let resolvedSize = size;
   return {
     name,
-    read: async () => readFile(path),
+    get size() {
+      return resolvedSize;
+    },
+    read: async () => {
+      const bytes = await readFile(path);
+      resolvedSize = bytes.byteLength;
+      return bytes;
+    },
   };
 }
 
@@ -34,12 +42,59 @@ export async function scanDirectoryLogs(dirPath: string): Promise<ReadableLog[]>
     const files: ReadableLog[] = [];
     for (const entry of entries) {
       if (entry.isDirectory) continue;
-      files.push(await asReadable(joinPath(dirPath, entry.name)));
+      const fullPath = joinPath(dirPath, entry.name);
+      let size: number | undefined;
+      try {
+        const info = await stat(fullPath);
+        size = info.size;
+      } catch {
+        // stat 失敗時は undefined
+      }
+      files.push(await asReadable(fullPath, size));
     }
     files.sort((a, b) => a.name.localeCompare(b.name, "ja"));
     return files;
   } catch {
     return [];
+  }
+}
+
+export interface DirectorySnapshot {
+  fileCount: number;
+  totalSize: number;
+  latestFileName?: string;
+  latestFileSize?: number;
+}
+
+/** フォルダ変更検知用の軽量スナップショット */
+export async function getDirectorySnapshot(dirPath: string): Promise<DirectorySnapshot | null> {
+  try {
+    const isDir = await exists(dirPath);
+    if (!isDir) return null;
+    const entries = await readDir(dirPath);
+    let totalSize = 0;
+    let fileCount = 0;
+    let latestFileName: string | undefined;
+    let latestFileSize = 0;
+
+    for (const entry of entries) {
+      if (entry.isDirectory) continue;
+      fileCount += 1;
+      const fullPath = joinPath(dirPath, entry.name);
+      try {
+        const info = await stat(fullPath);
+        totalSize += info.size;
+        if (!latestFileName || entry.name > latestFileName) {
+          latestFileName = entry.name;
+          latestFileSize = info.size;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return { fileCount, totalSize, latestFileName, latestFileSize };
+  } catch {
+    return null;
   }
 }
 

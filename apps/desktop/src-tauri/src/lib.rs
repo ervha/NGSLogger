@@ -102,7 +102,7 @@ fn simplify_verbatim_unc(rest: &str) -> Option<String> {
     if parts.len() < 2 || !parts.iter().copied().all(is_safe_windows_component) {
         return None;
     }
-    let simplified = format!("\\\\{tail}");
+    let simplified = format!(r"\\{tail}");
     let simplified = trim_trailing_windows_sep(&simplified).to_string();
     if exceeds_legacy_max_path(&simplified) {
         return None;
@@ -244,12 +244,18 @@ fn remembered_log_folder_file(app: &tauri::AppHandle) -> Result<PathBuf, String>
 }
 
 /// `documents` は Known Folder の結果をそのまま渡す。`Documents` という名前は足さない。
+/// 実在する場合は NGS の log_ngs を優先し、無ければ旧 PSO2 の log を返す。
 fn official_log_dir_from(documents: &Path) -> PathBuf {
-    let mut dir = documents.to_path_buf();
-    for part in OFFICIAL_LOG_PARTS {
-        dir.push(part);
+    let base = documents.join("SEGA").join("PHANTASYSTARONLINE2");
+    let ngs = base.join("log_ngs");
+    if ngs.is_dir() {
+        return ngs;
     }
-    dir
+    let classic = base.join("log");
+    if classic.is_dir() {
+        return classic;
+    }
+    classic
 }
 
 /// 公式ログフォルダ。Windows では `FOLDERID_Documents`（`SHGetKnownFolderPath`）。
@@ -261,16 +267,22 @@ fn official_log_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
 }
 
 fn allow_official_log_dir(app: &tauri::AppHandle) {
-    let Some(dir) = official_log_dir(app) else {
+    let Some(documents) = app.path().document_dir().ok() else {
         return;
     };
-    let _ = app.fs_scope().allow_directory(&dir, true);
+    let base = documents.join("SEGA").join("PHANTASYSTARONLINE2");
+    let _ = app
+        .fs_scope()
+        .allow_directory(&display_log_path(&base.join("log_ngs")), true);
+    let _ = app
+        .fs_scope()
+        .allow_directory(&display_log_path(&base.join("log")), true);
 }
 
 fn read_remembered_log_folder(app: &tauri::AppHandle) -> Option<PathBuf> {
-    let file = remembered_log_folder_file(app).ok()?;
-    let text = std::fs::read_to_string(file).ok()?;
-    let path = parse_remembered_log_folder(&text)?;
+    let file = remembered_log_folder_file(app).ok()?;\
+    let text = std::fs::read_to_string(file).ok()?;\
+    let path = parse_remembered_log_folder(&text)?;\
     normalize_existing_dir(&path)
 }
 
@@ -328,15 +340,21 @@ fn remembered_log_directory(app: tauri::AppHandle) -> Option<String> {
     read_remembered_log_folder(&app).map(|path| path.to_string_lossy().into_owned())
 }
 
-/// 公式ログフォルダの実パス。フォルダがまだ無いときは null。
+/// 公式ログフォルダの実パス。実在する log_ngs または log を返す。フォルダがまだ無いときは null。
 /// ダイアログで別の場所を選んでいるときは、画面側がそちらを優先する。
 #[tauri::command]
 fn official_log_directory(app: tauri::AppHandle) -> Option<String> {
-    let dir = official_log_dir(&app)?;
-    if !dir.is_dir() {
-        return None;
+    let documents = app.path().document_dir().ok()?;
+    let base = documents.join("SEGA").join("PHANTASYSTARONLINE2");
+    let ngs = base.join("log_ngs");
+    if ngs.is_dir() {
+        return Some(display_log_path(&ngs).to_string_lossy().into_owned());
     }
-    Some(dir.to_string_lossy().into_owned())
+    let classic = base.join("log");
+    if classic.is_dir() {
+        return Some(display_log_path(&classic).to_string_lossy().into_owned());
+    }
+    None
 }
 
 /// WebView2 のキャッシュを exe 隣の data\webview に置く。Windows だけで有効。
@@ -346,7 +364,7 @@ fn open_main_window(app: &mut tauri::App) -> tauri::Result<()> {
             return None;
         }
         let webview = dir.join("data").join("webview");
-        std::fs::create_dir_all(&webview).ok()?;
+        std::fs::create_dir_all(&webview).ok()?;\
         Some(webview)
     });
 

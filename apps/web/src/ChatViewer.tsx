@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ChatRow } from "@meseta/core";
+import { exportChatRowsCsv } from "./exportCsv.ts";
 
 interface ChatViewerProps {
   chatRows: readonly ChatRow[];
@@ -32,6 +33,7 @@ function renderHighlightedText(text: string, highlightKeywords: readonly string[
 export function ChatViewer({ chatRows, onToggleReadChat, readChat }: ChatViewerProps) {
   const [selectedChannel, setSelectedChannel] = useState<string>("ALL");
   const [keyword, setKeyword] = useState<string>("");
+  const [onlyHighlighted, setOnlyHighlighted] = useState<boolean>(false);
   const [highlightWord, setHighlightWord] = useState<string>(() => {
     try {
       return localStorage.getItem("meseta_chat_highlight") ?? "";
@@ -69,10 +71,20 @@ export function ChatViewer({ chatRows, onToggleReadChat, readChat }: ChatViewerP
     return chatRows
       .filter((row) => {
         if (selectedChannel !== "ALL" && row.channel !== selectedChannel) return false;
+        const lowerBody = row.body.toLowerCase();
+        const lowerSender = row.characterName.toLowerCase();
+
+        if (onlyHighlighted && highlightList.length > 0) {
+          const matchHl = highlightList.some(
+            (hl) => lowerBody.includes(hl.toLowerCase()) || lowerSender.includes(hl.toLowerCase()),
+          );
+          if (!matchHl) return false;
+        }
+
         if (keyword.trim()) {
           const lower = keyword.toLowerCase();
-          const matchBody = row.body.toLowerCase().includes(lower);
-          const matchSender = row.characterName.toLowerCase().includes(lower);
+          const matchBody = lowerBody.includes(lower);
+          const matchSender = lowerSender.includes(lower);
           if (!matchBody && !matchSender) return false;
         }
         return true;
@@ -81,21 +93,33 @@ export function ChatViewer({ chatRows, onToggleReadChat, readChat }: ChatViewerP
         const cmp = a.timestamp.localeCompare(b.timestamp) || a.sequence - b.sequence;
         return sortOrder === "asc" ? cmp : -cmp;
       });
-  }, [chatRows, selectedChannel, keyword, sortOrder]);
+  }, [chatRows, selectedChannel, keyword, onlyHighlighted, highlightList, sortOrder]);
 
   return (
     <section className="chat-viewer" aria-label="チャット履歴">
       <div className="chat-header">
         <h2>チャット履歴（遡り確認）</h2>
-        <div className="chat-toggle">
-          <label>
-            <input
-              type="checkbox"
-              checked={readChat}
-              onChange={(e) => onToggleReadChat(e.target.checked)}
-            />
-            チャット読み取りを有効にする（オプトイン）
-          </label>
+        <div className="chat-header-actions">
+          {readChat && chatRows.length > 0 && (
+            <button
+              type="button"
+              className="secondary-button compact-btn"
+              onClick={() => exportChatRowsCsv(chatRows)}
+              title="チャットログを CSV でダウンロード"
+            >
+              💬 チャットCSV
+            </button>
+          )}
+          <div className="chat-toggle">
+            <label>
+              <input
+                type="checkbox"
+                checked={readChat}
+                onChange={(e) => onToggleReadChat(e.target.checked)}
+              />
+              チャット読み取りを有効にする（オプトイン）
+            </label>
+          </div>
         </div>
       </div>
 
@@ -138,7 +162,7 @@ export function ChatViewer({ chatRows, onToggleReadChat, readChat }: ChatViewerP
             </div>
 
             <div className="control-group">
-              <label htmlFor="chat-highlight">注目ワード強調:</label>
+              <label htmlFor="chat-highlight">注目ワード:</label>
               <input
                 id="chat-highlight"
                 type="text"
@@ -147,6 +171,19 @@ export function ChatViewer({ chatRows, onToggleReadChat, readChat }: ChatViewerP
                 onChange={(e) => handleHighlightChange(e.target.value)}
               />
             </div>
+
+            {highlightList.length > 0 && (
+              <div className="control-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={onlyHighlighted}
+                    onChange={(e) => setOnlyHighlighted(e.target.checked)}
+                  />
+                  ★ 注目ワードのみ
+                </label>
+              </div>
+            )}
 
             <div className="control-group">
               <button

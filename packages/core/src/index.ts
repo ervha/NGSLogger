@@ -49,11 +49,15 @@ export type {
 } from "./estimateSales.ts";
 
 export {
+  buildPlaySessions,
   getBoundaryDate,
+  rankSoldItems,
   summarizeLedger,
 } from "./ledgerSummary.ts";
 export type {
   DailySummary,
+  ItemSalesRanking,
   LedgerAnalytics,
+  PlaySession,
   ShopSummary,
 } from "./ledgerSummary.ts";

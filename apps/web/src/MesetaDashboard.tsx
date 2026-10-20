@@ -2,8 +2,16 @@ import { BarChart, LineChart } from "echarts/charts";
 import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
 import { use as registerEcharts, init } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LedgerAnalytics } from "@meseta/core";
+import { CalendarHeatmap } from "./CalendarHeatmap.tsx";
+import { SessionList } from "./SessionList.tsx";
+import { ItemRankingsView } from "./ItemRankingsView.tsx";
+import {
+  exportDailySummaryCsv,
+  exportItemRankingsCsv,
+  exportSessionsCsv,
+} from "./exportCsv.ts";
 
 registerEcharts([BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
@@ -13,8 +21,10 @@ interface MesetaDashboardProps {
 
 export function MesetaDashboard({ analytics }: MesetaDashboardProps) {
   const chartHost = useRef<HTMLDivElement>(null);
+  const [subView, setSubView] = useState<"charts" | "calendar" | "sessions" | "rankings">("charts");
 
   useEffect(() => {
+    if (subView !== "charts") return;
     const el = chartHost.current;
     if (!el || analytics.daily.length === 0) return;
 
@@ -82,12 +92,40 @@ export function MesetaDashboard({ analytics }: MesetaDashboardProps) {
       window.removeEventListener("resize", onResize);
       chart.dispose();
     };
-  }, [analytics.daily]);
+  }, [analytics.daily, subView]);
 
   return (
     <section className="dashboard-panel" aria-label="メセタ収支ダッシュボード">
       <header className="dashboard-header">
-        <h2>メセタ収支 & マイショップ分析</h2>
+        <h2>メセタ収支 & プレイ分析</h2>
+        <div className="csv-export-actions">
+          <button
+            type="button"
+            className="secondary-button compact-btn"
+            onClick={() => exportDailySummaryCsv(analytics.daily)}
+            title="日別収支を CSV でダウンロード"
+          >
+            📊 日別CSV
+          </button>
+          <button
+            type="button"
+            className="secondary-button compact-btn"
+            onClick={() => exportSessionsCsv(analytics.sessions)}
+            title="セッション時給を CSV でダウンロード"
+          >
+            ⏱️ セッションCSV
+          </button>
+          {analytics.itemRankings.length > 0 && (
+            <button
+              type="button"
+              className="secondary-button compact-btn"
+              onClick={() => exportItemRankingsCsv(analytics.itemRankings)}
+              title="売れ筋ランキングを CSV でダウンロード"
+            >
+              🏷️ ランキングCSV
+            </button>
+          )}
+        </div>
       </header>
 
       {/* KPI カード */}
@@ -126,98 +164,148 @@ export function MesetaDashboard({ analytics }: MesetaDashboardProps) {
         </div>
       </div>
 
-      {/* 収支推移チャート */}
-      {analytics.daily.length > 0 && (
-        <div className="chart-wrapper">
-          <h3>日別収支の推移</h3>
-          <div ref={chartHost} className="chart" />
-        </div>
-      )}
-
-      {/* マイショップ売却推定レポート */}
-      <div className="shop-analytics-section">
-        <h3>マイショップ出品・売却状況</h3>
-        <div className="shop-status-chips">
-          <span className="status-chip open">出品中: {analytics.shopSummary.openListings}件</span>
-          <span className="status-chip sold">売却推定済: {analytics.shopSummary.soldListings}件</span>
-          <span className="status-chip withdrawn">取下済: {analytics.shopSummary.withdrawnListings}件</span>
-          {analytics.shopSummary.ambiguousListings > 0 && (
-            <span className="status-chip ambiguous">未特定: {analytics.shopSummary.ambiguousListings}件</span>
-          )}
-        </div>
-
-        {analytics.recentSales.length > 0 && (
-          <div className="recent-sales-list">
-            <h4>売上回収と売却推定アイテム</h4>
-            <table>
-              <thead>
-                <tr>
-                  <th>回収日時</th>
-                  <th>回収額</th>
-                  <th>売上額（額面）</th>
-                  <th>売却推定アイテム</th>
-                </tr>
-              </thead>
-              <tbody>
-                {analytics.recentSales.map((sale, i) => (
-                  <tr key={`${sale.takenAt}_${i}`}>
-                    <td>{sale.takenAt.replace("T", " ")}</td>
-                    <td className="number-cell font-bold">+{sale.amount.toLocaleString()}</td>
-                    <td className="number-cell font-mono">{sale.gross.toLocaleString()}</td>
-                    <td>
-                      {sale.items.map((it, idx) => (
-                        <div key={idx} className={sale.isCertain ? "item-certain" : "item-candidate"}>
-                          {it}
-                        </div>
-                      ))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      {/* サブビュー切替タブ */}
+      <div className="sub-tab-bar" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subView === "charts"}
+          className={`sub-tab ${subView === "charts" ? "active" : ""}`}
+          onClick={() => setSubView("charts")}
+        >
+          📈 収支推移・内訳
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subView === "calendar"}
+          className={`sub-tab ${subView === "calendar" ? "active" : ""}`}
+          onClick={() => setSubView("calendar")}
+        >
+          📅 カレンダー
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subView === "sessions"}
+          className={`sub-tab ${subView === "sessions" ? "active" : ""}`}
+          onClick={() => setSubView("sessions")}
+        >
+          ⏱️ セッション時給
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subView === "rankings"}
+          className={`sub-tab ${subView === "rankings" ? "active" : ""}`}
+          onClick={() => setSubView("rankings")}
+        >
+          🏷️ 売れ筋アイテム ({analytics.itemRankings.length})
+        </button>
       </div>
 
-      {/* 日別テーブル */}
-      {analytics.daily.length > 0 && (
-        <div className="daily-table-section">
-          <h3>日別収支内訳</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>日付</th>
-                <th>収入</th>
-                <th>支出</th>
-                <th>純利益</th>
-                <th>ショップ受取</th>
-                <th>換金</th>
-                <th>ショップ購入</th>
-                <th>NPC購入</th>
-              </tr>
-            </thead>
-            <tbody>
-              {analytics.daily.map((d) => (
-                <tr key={d.date}>
-                  <td className="font-mono">{d.date}</td>
-                  <td className="number-cell positive">+{d.income.toLocaleString()}</td>
-                  <td className="number-cell negative">
-                    {d.expense > 0 ? `-${d.expense.toLocaleString()}` : "0"}
-                  </td>
-                  <td className={`number-cell font-bold ${d.net >= 0 ? "positive" : "negative"}`}>
-                    {d.net > 0 ? "+" : ""}
-                    {d.net.toLocaleString()}
-                  </td>
-                  <td className="number-cell font-mono">{d.breakdown.shopTakes.toLocaleString()}</td>
-                  <td className="number-cell font-mono">{d.breakdown.exchanges.toLocaleString()}</td>
-                  <td className="number-cell font-mono">{d.breakdown.shopPurchases.toLocaleString()}</td>
-                  <td className="number-cell font-mono">{d.breakdown.npcPurchases.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {/* サブビューコンテンツ */}
+      {subView === "charts" && (
+        <>
+          {analytics.daily.length > 0 && (
+            <div className="chart-wrapper">
+              <h3>日別収支の推移</h3>
+              <div ref={chartHost} className="chart" />
+            </div>
+          )}
+
+          {/* マイショップ売却推定レポート */}
+          <div className="shop-analytics-section">
+            <h3>マイショップ出品・売却状況</h3>
+            <div className="shop-status-chips">
+              <span className="status-chip open">出品中: {analytics.shopSummary.openListings}件</span>
+              <span className="status-chip sold">売却推定済: {analytics.shopSummary.soldListings}件</span>
+              <span className="status-chip withdrawn">取下済: {analytics.shopSummary.withdrawnListings}件</span>
+              {analytics.shopSummary.ambiguousListings > 0 && (
+                <span className="status-chip ambiguous">未特定: {analytics.shopSummary.ambiguousListings}件</span>
+              )}
+            </div>
+
+            {analytics.recentSales.length > 0 && (
+              <div className="recent-sales-list">
+                <h4>売上回収と売却推定アイテム</h4>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>回収日時</th>
+                      <th>回収額</th>
+                      <th>売上額（額面）</th>
+                      <th>売却推定アイテム</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analytics.recentSales.map((sale, i) => (
+                      <tr key={`${sale.takenAt}_${i}`}>
+                        <td>{sale.takenAt.replace("T", " ")}</td>
+                        <td className="number-cell font-bold">+{sale.amount.toLocaleString()}</td>
+                        <td className="number-cell font-mono">{sale.gross.toLocaleString()}</td>
+                        <td>
+                          {sale.items.map((it, idx) => (
+                            <div key={idx} className={sale.isCertain ? "item-certain" : "item-candidate"}>
+                              {it}
+                            </div>
+                          ))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* 日別テーブル */}
+          {analytics.daily.length > 0 && (
+            <div className="daily-table-section">
+              <h3>日別収支内訳</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>日付</th>
+                    <th>収入</th>
+                    <th>支出</th>
+                    <th>純利益</th>
+                    <th>ショップ受取</th>
+                    <th>換金</th>
+                    <th>ショップ購入</th>
+                    <th>NPC購入</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analytics.daily.map((d) => (
+                    <tr key={d.date}>
+                      <td className="font-mono">{d.date}</td>
+                      <td className="number-cell positive">+{d.income.toLocaleString()}</td>
+                      <td className="number-cell negative">
+                        {d.expense > 0 ? `-${d.expense.toLocaleString()}` : "0"}
+                      </td>
+                      <td className={`number-cell font-bold ${d.net >= 0 ? "positive" : "negative"}`}>
+                        {d.net > 0 ? "+" : ""}
+                        {d.net.toLocaleString()}
+                      </td>
+                      <td className="number-cell font-mono">{d.breakdown.shopTakes.toLocaleString()}</td>
+                      <td className="number-cell font-mono">{d.breakdown.exchanges.toLocaleString()}</td>
+                      <td className="number-cell font-mono">{d.breakdown.shopPurchases.toLocaleString()}</td>
+                      <td className="number-cell font-mono">{d.breakdown.npcPurchases.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
+
+      {subView === "calendar" && <CalendarHeatmap daily={analytics.daily} />}
+
+      {subView === "sessions" && <SessionList sessions={analytics.sessions} />}
+
+      {subView === "rankings" && <ItemRankingsView rankings={analytics.itemRankings} />}
     </section>
   );
 }
