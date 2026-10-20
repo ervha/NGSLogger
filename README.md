@@ -18,7 +18,16 @@
 - **データのバックアップ保存・復元**:
   - 現在の集計結果と設定を JSON ファイルとしてワンクリックでエクスポート / インポート。
 - GitHub Pages による Web 版の自動公開（main へのプッシュで自動デプロイ）
-- GitHub Releases による Windows デスクトップ版 zip の配布ワークフロー
+- GitHub Releases による Windows デスクトップ版（単体ポータブル exe および zip）の配布ワークフロー
+
+## ダウンロード（Windows 向けポータブル版）
+
+[Releases](https://github.com/ervha/NGSLogger/releases/latest) からダウンロードしてご利用いただけます。
+
+- **`MesetaLedger-v*-windows-x64.exe`**: インストール不要でそれ単体で完結して動作するポータブル版実行ファイルです。
+- **`MesetaLedger-v*-windows-x64.zip`**: exe に加えて README やドキュメントを同梱した zip アーカイブです。
+
+Web 版（インストール不要・ブラウザ動作）: [https://ervha.github.io/NGSLogger/](https://ervha.github.io/NGSLogger/)
 
 ## デスクトップ版をビルドする
 

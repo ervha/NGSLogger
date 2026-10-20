@@ -29,7 +29,7 @@ jobs:
       - name: デスクトップ版のビルド (exe)
         run: pnpm --filter desktop build
 
-      - name: zip アーカイブと SHA-256 チェックサムの作成
+      - name: ポータブル exe と zip アーカイブ、各 SHA-256 チェックサムの作成
         id: package
         shell: pwsh
         run: |
@@ -49,10 +49,21 @@ jobs:
           $targetExe = $exeFiles[0].FullName
           Write-Host "検出したバイナリ: $targetExe"
 
+          # 1. 単体で完結して動作するポータブル exe の作成
+          $standaloneExeName = "MesetaLedger-${version}-windows-x64.exe"
+          $standaloneExePath = Join-Path $distDir $standaloneExeName
+          Copy-Item $targetExe -Destination $standaloneExePath
+
+          $exeHash = (Get-FileHash -Path $standaloneExePath -Algorithm SHA256).Hash.ToLower()
+          $exeShaFile = "${standaloneExePath}.sha256"
+          "$exeHash  $standaloneExeName" | Out-File -FilePath $exeShaFile -Encoding utf8NoBOM
+          Write-Host "作成完了: $standaloneExePath"
+          Write-Host "SHA-256 (exe): $exeHash"
+
+          # 2. ドキュメント同梱の zip アーカイブ作成
           $zipName = "MesetaLedger-${version}-windows-x64.zip"
           $zipPath = Join-Path $distDir $zipName
 
-          # README と docs も同梱して zip 化
           $tempStaging = Join-Path $distDir "staging"
           New-Item -ItemType Directory -Force -Path $tempStaging | Out-Null
           Copy-Item $targetExe -Destination (Join-Path $tempStaging "MesetaLedger.exe")
@@ -62,19 +73,20 @@ jobs:
           Compress-Archive -Path "$tempStaging\*" -DestinationPath $zipPath -Force
           Remove-Item -Recurse -Force $tempStaging
 
-          # SHA-256 チェックサム生成
+          # SHA-256 チェックサム生成 (zip)
           $hash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
           $shaFile = "${zipPath}.sha256"
           "$hash  $zipName" | Out-File -FilePath $shaFile -Encoding utf8NoBOM
 
           Write-Host "作成完了: $zipPath"
-          Write-Host "SHA-256: $hash"
+          Write-Host "SHA-256 (zip): $hash"
 
-      - name: zip と SHA-256 をアーティファクトとして保存
+      - name: 成果物をアーティファクトとして保存
         uses: actions/upload-artifact@v4
         with:
           name: desktop-windows-x64
           path: |
+            dist-release/*.exe
             dist-release/*.zip
             dist-release/*.sha256
           retention-days: 7
@@ -85,6 +97,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
+            dist-release/*.exe
             dist-release/*.zip
             dist-release/*.sha256
           draft: false
